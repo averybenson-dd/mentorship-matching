@@ -6,12 +6,15 @@ import {
   backendConfigured,
   deleteApplication,
   exportSnapshot,
+  getLlmConfig,
   getProgramState,
   listApplications,
+  pingLlmGateway,
   runAiMatch,
   setProgramState,
   updateApplication,
 } from "../lib/api";
+import type { LlmEnvSummary, LlmPingResult, RunAiMatchMeta } from "../lib/api";
 import { getAdminPassword, isAdminAuthenticated, loginAdmin, logoutAdmin } from "../lib/adminSession";
 import type { ApplicationPayload, ProgramState, StoredApplication } from "../types";
 
@@ -61,6 +64,10 @@ export default function AdminPage() {
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [matchError, setMatchError] = useState<string | null>(null);
+  const [llmEnv, setLlmEnv] = useState<LlmEnvSummary | null>(null);
+  const [llmPing, setLlmPing] = useState<LlmPingResult | null>(null);
+  const [lastMatchLlm, setLastMatchLlm] = useState<RunAiMatchMeta | null>(null);
+  const [llmPanelError, setLlmPanelError] = useState<string | null>(null);
 
   const [modal, setModal] = useState<ModalMode>("none");
   const [active, setActive] = useState<StoredApplication | null>(null);
@@ -122,7 +129,8 @@ export default function AdminPage() {
     setMatchError(null);
     setBusy(true);
     try {
-      await runAiMatch(ap);
+      const { llm } = await runAiMatch(ap);
+      setLastMatchLlm(llm ?? null);
       await refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Match failed";
@@ -154,13 +162,41 @@ export default function AdminPage() {
     setMatchError(null);
     setBusy(true);
     try {
-      await runAiMatch(ap);
+      const { llm } = await runAiMatch(ap);
+      setLastMatchLlm(llm ?? null);
       await refresh();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Rematch failed";
       setMatchError(resolveMatchSetupError(msg));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onLoadLlmConfig = async () => {
+    const ap = requirePwd();
+    if (!ap) return;
+    setLlmPanelError(null);
+    setLlmPing(null);
+    try {
+      setLlmEnv(await getLlmConfig(ap));
+    } catch (e) {
+      setLlmPanelError(e instanceof Error ? e.message : "Could not load LLM config");
+    }
+  };
+
+  const onPingLlm = async () => {
+    const ap = requirePwd();
+    if (!ap) return;
+    setLlmPanelError(null);
+    try {
+      const r = await pingLlmGateway(ap);
+      setLlmPing(r);
+      if (!r.ok) {
+        setLlmPanelError(r.detail ? `${r.error}: ${r.detail}` : (r.error ?? "Ping failed"));
+      }
+    } catch (e) {
+      setLlmPanelError(e instanceof Error ? e.message : "Ping failed");
     }
   };
 
@@ -300,6 +336,64 @@ export default function AdminPage() {
           and writes multi-paragraph rationales grounded in what each person wrote. If the model output
           fails validation, fix applications and try again.
         </p>
+        {lastMatchLlm && (
+          <p className="muted" style={{ marginTop: "1rem", marginBottom: 0 }}>
+            Last successful <strong>Match</strong> called <code>{lastMatchLlm.chatUrlHost}</code> (
+            {lastMatchLlm.gateway}, <code>{lastMatchLlm.routing}</code>). Requested{" "}
+            <code>{lastMatchLlm.modelRequested}</code>
+            {lastMatchLlm.modelReported ? (
+              <>
+                {" "}
+                · upstream reported <code>{lastMatchLlm.modelReported}</code>
+              </>
+            ) : (
+              <> · upstream did not echo a model id (check Portkey logs).</>
+            )}
+          </p>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>LLM / Portkey diagnostics</h2>
+        <p className="muted">
+          Shows how <code>mentor-backend</code> resolves credentials from Supabase secrets (keys are never returned).
+          <strong> Ping gateway</strong> runs one tiny chat completion on the same path as matching. If rationales
+          still feel generic, compare <code>modelReported</code> to <code>OPENAI_MODEL</code> and your Portkey
+          virtual key / config (fallback model, transforms, cache).
+        </p>
+        {llmPanelError && <div className="error">{llmPanelError}</div>}
+        <div className="stack" style={{ marginTop: "0.75rem" }}>
+          <button type="button" className="btn secondary" onClick={() => void onLoadLlmConfig()}>
+            Load LLM config
+          </button>
+          <button type="button" className="btn secondary" onClick={() => void onPingLlm()}>
+            Ping gateway
+          </button>
+        </div>
+        {llmEnv && (
+          <pre className="muted" style={{ marginTop: "1rem", fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>
+            {JSON.stringify(llmEnv, null, 2)}
+          </pre>
+        )}
+        {llmPing && (
+          <pre className="muted" style={{ marginTop: "1rem", fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>
+            {JSON.stringify(
+              {
+                ok: llmPing.ok,
+                error: llmPing.error,
+                detail: llmPing.detail,
+                latencyMs: llmPing.latencyMs,
+                gateway: llmPing.gateway,
+                routing: llmPing.routing,
+                chatUrlHost: llmPing.chatUrlHost,
+                modelRequested: llmPing.modelRequested,
+                modelReported: llmPing.modelReported,
+              },
+              null,
+              2,
+            )}
+          </pre>
+        )}
       </div>
 
       <div className="card">

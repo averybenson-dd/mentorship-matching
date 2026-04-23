@@ -276,8 +276,62 @@ function validateLlmPairs(
   return out;
 }
 
+type LlmRouting =
+  | "virtual_key"
+  | "provider_slug"
+  | "openai_via_portkey"
+  | "openai_direct";
+
+type LlmGatewayMeta = {
+  gateway: "portkey" | "openai";
+  routing: LlmRouting;
+  chatUrlHost: string;
+};
+
+/** Non-secret snapshot for admin diagnostics (matches routing logic below). */
+function getLlmEnvSummary(): {
+  gateway: "portkey" | "openai" | "none";
+  routing: string;
+  openaiModel: string;
+  portkeyApiKeyPresent: boolean;
+  portkeyVirtualKeyPresent: boolean;
+  portkeyProviderPresent: boolean;
+  openaiKeyPresent: boolean;
+} {
+  const portkeyApiKeyPresent = Boolean(Deno.env.get("PORTKEY_API_KEY")?.trim());
+  const portkeyVirtualKeyPresent = Boolean(Deno.env.get("PORTKEY_VIRTUAL_KEY")?.trim());
+  const portkeyProviderPresent = Boolean(Deno.env.get("PORTKEY_PROVIDER")?.trim());
+  const openaiKeyPresent = Boolean(Deno.env.get("OPENAI_API_KEY")?.trim());
+  const openaiModel = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
+  let gateway: "portkey" | "openai" | "none" = "none";
+  let routing = "missing_llm_credentials";
+  if (portkeyApiKeyPresent) {
+    gateway = "portkey";
+    if (portkeyVirtualKeyPresent) routing = "virtual_key";
+    else if (portkeyProviderPresent) routing = "provider_slug";
+    else if (openaiKeyPresent) routing = "openai_via_portkey";
+    else routing = "portkey_missing_virtual_key_provider_or_openai";
+  } else if (openaiKeyPresent) {
+    gateway = "openai";
+    routing = "openai_direct";
+  }
+  return {
+    gateway,
+    routing,
+    openaiModel,
+    portkeyApiKeyPresent,
+    portkeyVirtualKeyPresent,
+    portkeyProviderPresent,
+    openaiKeyPresent,
+  };
+}
+
 /** OpenAI direct, or Portkey gateway (https://docs.portkey.ai/docs/api-reference/headers). */
-function resolveChatCompletionsRequest(): { url: string; headers: Record<string, string> } {
+function resolveChatCompletionsRequest(): {
+  url: string;
+  headers: Record<string, string>;
+  meta: LlmGatewayMeta;
+} {
   const portkey = Deno.env.get("PORTKEY_API_KEY")?.trim();
   const virtualKey = Deno.env.get("PORTKEY_VIRTUAL_KEY")?.trim();
   const openaiKey = Deno.env.get("OPENAI_API_KEY")?.trim();
@@ -288,25 +342,32 @@ function resolveChatCompletionsRequest(): { url: string; headers: Record<string,
       "x-portkey-api-key": portkey,
       "Content-Type": "application/json",
     };
+    let routing: LlmRouting;
     if (virtualKey) {
       headers["x-portkey-virtual-key"] = virtualKey;
+      routing = "virtual_key";
     } else if (providerSlug) {
       headers["x-portkey-provider"] = providerSlug;
+      routing = "provider_slug";
     } else if (openaiKey) {
       headers["x-portkey-provider"] = "openai";
       headers["Authorization"] = `Bearer ${openaiKey}`;
+      routing = "openai_via_portkey";
     } else {
       throw new Error("missing_portkey_provider");
     }
-    return { url: "https://api.portkey.ai/v1/chat/completions", headers };
+    const url = "https://api.portkey.ai/v1/chat/completions";
+    return { url, headers, meta: { gateway: "portkey", routing, chatUrlHost: "api.portkey.ai" } };
   }
   if (openaiKey) {
+    const url = "https://api.openai.com/v1/chat/completions";
     return {
-      url: "https://api.openai.com/v1/chat/completions",
+      url,
       headers: {
         Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
+      meta: { gateway: "openai", routing: "openai_direct", chatUrlHost: "api.openai.com" },
     };
   }
   throw new Error("missing_llm_credentials");
@@ -314,8 +375,13 @@ function resolveChatCompletionsRequest(): { url: string; headers: Record<string,
 
 async function runAiMatchWithOpenAI(
   supabase: ReturnType<typeof requireServiceClient>,
-): Promise<{ matches: Json[]; model: string; usage: Record<string, unknown> }> {
-  const { url: llmUrl, headers: llmHeaders } = resolveChatCompletionsRequest();
+): Promise<{
+  matches: Json[];
+  model: string;
+  usage: Record<string, unknown>;
+  llm: LlmGatewayMeta & { modelRequested: string; modelReported: string | null };
+}> {
+  const { url: llmUrl, headers: llmHeaders, meta: llmMeta } = resolveChatCompletionsRequest();
   const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
 
   const { data: appsRaw, error: aErr } = await withPostgrestRetry(async () =>
@@ -432,7 +498,17 @@ async function runAiMatchWithOpenAI(
   if (upErr) throw upErr;
 
   const usage = isRecord(oaJson.usage) ? oaJson.usage : {};
-  return { matches: matches as unknown as Json[], model, usage };
+  const modelReported = typeof oaJson.model === "string" ? oaJson.model : null;
+  return {
+    matches: matches as unknown as Json[],
+    model,
+    usage,
+    llm: {
+      ...llmMeta,
+      modelRequested: model,
+      modelReported,
+    },
+  };
 }
 
 Deno.serve(async (req) => {
@@ -549,9 +625,69 @@ Deno.serve(async (req) => {
 
     assertAdmin(req);
 
+    if (action === "llmConfig") {
+      return jsonResponse({ ok: true, ...getLlmEnvSummary() });
+    }
+
+    if (action === "llmPing") {
+      const env = getLlmEnvSummary();
+      if (env.gateway === "none" || (env.gateway === "portkey" && env.routing.startsWith("portkey_missing"))) {
+        return jsonResponse({ ok: false, error: env.routing });
+      }
+      let req: ReturnType<typeof resolveChatCompletionsRequest>;
+      try {
+        req = resolveChatCompletionsRequest();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "missing_llm_credentials";
+        return jsonResponse({ ok: false, error: msg });
+      }
+      const pingModel = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
+      const t0 = Date.now();
+      const oaRes = await fetch(req.url, {
+        method: "POST",
+        headers: req.headers,
+        body: JSON.stringify({
+          model: pingModel,
+          max_tokens: 4,
+          temperature: 0,
+          messages: [{ role: "user", content: "Reply with exactly: ok" }],
+        }),
+      });
+      const latencyMs = Date.now() - t0;
+      let oaJson: Record<string, unknown> = {};
+      try {
+        oaJson = (await oaRes.json()) as Record<string, unknown>;
+      } catch {
+        /* body not json */
+      }
+      const modelReported = typeof oaJson.model === "string" ? oaJson.model : null;
+      const errMsg = typeof oaJson.error === "object" && oaJson.error !== null &&
+          typeof (oaJson.error as Record<string, unknown>).message === "string"
+        ? String((oaJson.error as Record<string, unknown>).message)
+        : null;
+      if (!oaRes.ok) {
+        return jsonResponse({
+          ok: false,
+          error: `llm_ping_http_${oaRes.status}`,
+          detail: errMsg,
+          latencyMs,
+          ...req.meta,
+          modelRequested: pingModel,
+          modelReported,
+        });
+      }
+      return jsonResponse({
+        ok: true,
+        latencyMs,
+        ...req.meta,
+        modelRequested: pingModel,
+        modelReported,
+      });
+    }
+
     if (action === "runAiMatch") {
-      const { matches, model, usage } = await runAiMatchWithOpenAI(supabase);
-      return jsonResponse({ ok: true, matches, model, usage });
+      const { matches, model, usage, llm } = await runAiMatchWithOpenAI(supabase);
+      return jsonResponse({ ok: true, matches, model, usage, llm });
     }
 
     if (action === "listApplications") {

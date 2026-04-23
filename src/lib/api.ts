@@ -107,10 +107,82 @@ export async function getProgramState(adminPassword: string): Promise<ProgramSta
   };
 }
 
+export type LlmEnvSummary = {
+  gateway: string;
+  routing: string;
+  openaiModel: string;
+  portkeyApiKeyPresent: boolean;
+  portkeyVirtualKeyPresent: boolean;
+  portkeyProviderPresent: boolean;
+  openaiKeyPresent: boolean;
+};
+
+/** Reads Edge Function env wiring for OpenAI vs Portkey (no keys returned). Admin only. */
+export async function getLlmConfig(adminPassword: string): Promise<LlmEnvSummary> {
+  const out = await invoke({ action: "llmConfig" }, adminPassword);
+  if (!out.ok) throw new Error("llm_config_failed");
+  return {
+    gateway: String(out.gateway),
+    routing: String(out.routing),
+    openaiModel: String(out.openaiModel),
+    portkeyApiKeyPresent: Boolean(out.portkeyApiKeyPresent),
+    portkeyVirtualKeyPresent: Boolean(out.portkeyVirtualKeyPresent),
+    portkeyProviderPresent: Boolean(out.portkeyProviderPresent),
+    openaiKeyPresent: Boolean(out.openaiKeyPresent),
+  };
+}
+
+export type LlmPingResult = {
+  ok: boolean;
+  error?: string;
+  detail?: string | null;
+  latencyMs?: number;
+  gateway?: string;
+  routing?: string;
+  chatUrlHost?: string;
+  modelRequested?: string;
+  modelReported?: string | null;
+};
+
+/** One tiny completion via the same path as matching (Portkey or OpenAI). Admin only. */
+export async function pingLlmGateway(adminPassword: string): Promise<LlmPingResult> {
+  const out = (await invoke({ action: "llmPing" }, adminPassword)) as Record<string, unknown>;
+  return {
+    ok: Boolean(out.ok),
+    error: typeof out.error === "string" ? out.error : undefined,
+    detail: typeof out.detail === "string" ? out.detail : null,
+    latencyMs: typeof out.latencyMs === "number" ? out.latencyMs : undefined,
+    gateway: typeof out.gateway === "string" ? out.gateway : undefined,
+    routing: typeof out.routing === "string" ? out.routing : undefined,
+    chatUrlHost: typeof out.chatUrlHost === "string" ? out.chatUrlHost : undefined,
+    modelRequested: typeof out.modelRequested === "string" ? out.modelRequested : undefined,
+    modelReported: typeof out.modelReported === "string" ? out.modelReported : null,
+  };
+}
+
+export type RunAiMatchMeta = {
+  gateway: string;
+  routing: string;
+  chatUrlHost: string;
+  modelRequested: string;
+  modelReported: string | null;
+};
+
 /** Runs LLM matching on the server (Edge Function). Configure OpenAI and/or Portkey secrets — see README. */
-export async function runAiMatch(adminPassword: string): Promise<void> {
+export async function runAiMatch(adminPassword: string): Promise<{ llm?: RunAiMatchMeta }> {
   const out = await invoke({ action: "runAiMatch" }, adminPassword);
   if (!out.ok) throw new Error("ai_match_failed");
+  const llm = out.llm as Record<string, unknown> | undefined;
+  if (!llm || typeof llm.gateway !== "string") return {};
+  return {
+    llm: {
+      gateway: String(llm.gateway),
+      routing: String(llm.routing),
+      chatUrlHost: String(llm.chatUrlHost),
+      modelRequested: String(llm.modelRequested),
+      modelReported: typeof llm.modelReported === "string" ? llm.modelReported : null,
+    },
+  };
 }
 
 export async function setProgramState(adminPassword: string, next: ProgramState): Promise<void> {
