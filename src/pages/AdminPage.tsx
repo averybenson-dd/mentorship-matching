@@ -8,16 +8,45 @@ import {
   exportSnapshot,
   getProgramState,
   listApplications,
+  runAiMatch,
   setProgramState,
   updateApplication,
 } from "../lib/api";
 import { getAdminPassword, isAdminAuthenticated, loginAdmin, logoutAdmin } from "../lib/adminSession";
-import { runMatching } from "../lib/matching";
 import type { ApplicationPayload, ProgramState, StoredApplication } from "../types";
 
 type ModalMode = "none" | "delete" | "edit";
 
 const DELETE_PHRASE = "DELETE";
+
+function edgeUserMessage(msg: string): string {
+  if (msg === "unauthorized") {
+    return "Admin password rejected by the server (401). In Supabase Edge Function secrets, set ADMIN_PASSWORD to exactly match your admin login (no extra spaces). Redeploy mentor-backend, then log out and log back in.";
+  }
+  if (msg.startsWith("http_404")) {
+    return "Edge Function not found (404). Deploy: supabase functions deploy mentor-backend --no-verify-jwt — and confirm VITE_SUPABASE_URL points at this same project.";
+  }
+  if (msg === "Failed to fetch" || msg.includes("NetworkError")) {
+    return "Browser could not reach Supabase (network, ad blocker, or mixed content). Open DevTools → Network, retry, and inspect the call to …/functions/v1/mentor-backend.";
+  }
+  return msg;
+}
+
+function resolveMatchSetupError(msg: string): string {
+  if (msg === "missing_llm_credentials") {
+    return "No LLM credentials configured. Set OPENAI_API_KEY for direct OpenAI, OR use Portkey: PORTKEY_API_KEY plus PORTKEY_VIRTUAL_KEY (recommended). Run: supabase secrets set … then supabase functions deploy mentor-backend --no-verify-jwt.";
+  }
+  if (msg === "missing_portkey_provider") {
+    return "PORTKEY_API_KEY is set but Portkey still needs routing: set PORTKEY_VIRTUAL_KEY (OpenAI key stays in Portkey) or PORTKEY_PROVIDER (e.g. @openai-prod) / OPENAI_API_KEY per Portkey docs. Redeploy mentor-backend, then retry.";
+  }
+  if (msg === "llm_rationale_forbidden_score_language") {
+    return "The model tried to describe fit with percentages or boilerplate that conflicts with the numeric score. Click Run AI match again (the prompt now forbids that); if it keeps happening, try a slightly larger model in OPENAI_MODEL.";
+  }
+  if (msg === "llm_rationale_not_grounded_in_applications") {
+    return "The model’s rationale did not quote enough verbatim text from both applications. Retry Run AI match; if it repeats, shorten very long free-text answers slightly so the model can mirror real phrases.";
+  }
+  return edgeUserMessage(msg);
+}
 
 export default function AdminPage() {
   const [pwd, setPwd] = useState("");
@@ -31,6 +60,7 @@ export default function AdminPage() {
   }));
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [matchError, setMatchError] = useState<string | null>(null);
 
   const [modal, setModal] = useState<ModalMode>("none");
   const [active, setActive] = useState<StoredApplication | null>(null);
@@ -46,8 +76,11 @@ export default function AdminPage() {
       const [apps, prog] = await Promise.all([listApplications(ap), getProgramState(ap)]);
       setRows(apps);
       setProgram(prog);
-    } catch {
-      setLoadError("Could not load data from Supabase. Check the Edge Function and secrets.");
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : "unknown_error";
+      setLoadError(
+        `Could not load admin data. ${edgeUserMessage(raw)}`,
+      );
     }
   }, []);
 
@@ -86,13 +119,14 @@ export default function AdminPage() {
   const onMatch = async () => {
     const ap = requirePwd();
     if (!ap) return;
+    setMatchError(null);
     setBusy(true);
     try {
-      const apps = await listApplications(ap);
-      const matches = runMatching(apps);
-      const cur = await getProgramState(ap);
-      await setProgramState(ap, { ...cur, matches });
+      await runAiMatch(ap);
       await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Match failed";
+      setMatchError(resolveMatchSetupError(msg));
     } finally {
       setBusy(false);
     }
@@ -117,13 +151,14 @@ export default function AdminPage() {
   const onRematch = async () => {
     const ap = requirePwd();
     if (!ap) return;
+    setMatchError(null);
     setBusy(true);
     try {
-      const apps = await listApplications(ap);
-      const matches = runMatching(apps);
-      const cur = await getProgramState(ap);
-      await setProgramState(ap, { ...cur, matches });
+      await runAiMatch(ap);
       await refresh();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Rematch failed";
+      setMatchError(resolveMatchSetupError(msg));
     } finally {
       setBusy(false);
     }
@@ -228,7 +263,15 @@ export default function AdminPage() {
           sees the same data. The admin password is checked by the Edge Function using the{" "}
           <code>ADMIN_PASSWORD</code> secret — rotate it for anything beyond a trusted pilot.
         </div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          <strong>Match / Rematch</strong> calls an LLM from the <code>mentor-backend</code> Edge Function (not
+          your browser). Either set <code>OPENAI_API_KEY</code> for direct OpenAI, or use{" "}
+          <strong>Portkey</strong>: <code>PORTKEY_API_KEY</code> plus <code>PORTKEY_VIRTUAL_KEY</code> (recommended)
+          or <code>PORTKEY_PROVIDER</code> / <code>OPENAI_API_KEY</code> per Portkey docs. Optional{" "}
+          <code>OPENAI_MODEL</code> (default <code>gpt-4o-mini</code>). Redeploy after changing secrets.
+        </p>
         {loadError && <div className="error">{loadError}</div>}
+        {matchError && <div className="error">{matchError}</div>}
         <p className="muted" style={{ marginTop: 0 }}>
           Mentors: {summary.mentors} · Mentees: {summary.mentees} · Active matches:{" "}
           {summary.matches} · Published: {program.published ? "yes" : "no"}
@@ -253,9 +296,9 @@ export default function AdminPage() {
           </button>
         </div>
         <p className="muted" style={{ marginBottom: 0 }}>
-          Matching scores coaching/teaching text overlap, mentee value goals vs mentor superpower,
-          mutual availability, and each mentor&apos;s mentee capacity. Rationales are generated from the
-          text of both applications.
+          The model proposes pairs that respect mentor capacity and &quot;no&quot; availability flags,
+          and writes multi-paragraph rationales grounded in what each person wrote. If the model output
+          fails validation, fix applications and try again.
         </p>
       </div>
 
@@ -348,7 +391,7 @@ export default function AdminPage() {
                 <tr>
                   <th>Mentor</th>
                   <th>Mentee</th>
-                  <th>Score</th>
+                  <th>Score (0–1)</th>
                   <th>Rationale</th>
                 </tr>
               </thead>
@@ -360,7 +403,10 @@ export default function AdminPage() {
                     <tr key={`${m.mentorId}-${m.menteeId}`}>
                       <td>{mentor?.payload.name ?? m.mentorId}</td>
                       <td>{mentee?.payload.name ?? m.menteeId}</td>
-                      <td>{m.score}</td>
+                      <td>
+                        {m.score.toFixed(3)}
+                        <span className="muted"> (~{Math.round(m.score * 100)}%)</span>
+                      </td>
                       <td className="muted preline">{m.rationale}</td>
                     </tr>
                   );

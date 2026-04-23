@@ -24,10 +24,19 @@ async function invoke(body: Record<string, unknown>, adminPassword?: string) {
     throw new Error(`http_${res.status}`);
   }
   if (!res.ok) {
-    const err = typeof json.error === "string" ? json.error : `http_${res.status}`;
+    const err =
+      typeof json.error === "string"
+        ? json.error
+        : isRecord(json.error) && typeof json.error.message === "string"
+          ? String(json.error.message)
+          : `http_${res.status}`;
     throw new Error(err);
   }
   return json;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
 export function backendConfigured(): boolean {
@@ -96,6 +105,12 @@ export async function getProgramState(adminPassword: string): Promise<ProgramSta
     matches: Array.isArray(program.matches) ? (program.matches as ProgramState["matches"]) : [],
     updatedAt: String(program.updatedAt ?? new Date().toISOString()),
   };
+}
+
+/** Runs LLM matching on the server (Edge Function). Configure OpenAI and/or Portkey secrets — see README. */
+export async function runAiMatch(adminPassword: string): Promise<void> {
+  const out = await invoke({ action: "runAiMatch" }, adminPassword);
+  if (!out.ok) throw new Error("ai_match_failed");
 }
 
 export async function setProgramState(adminPassword: string, next: ProgramState): Promise<void> {

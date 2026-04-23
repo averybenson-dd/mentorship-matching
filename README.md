@@ -28,7 +28,42 @@ Set secrets (use a strong admin password in production; for the stock app use `a
 
 ```bash
 supabase secrets set ADMIN_PASSWORD=admin1999
+# optional: defaults to gpt-4o-mini
+supabase secrets set OPENAI_MODEL=gpt-4o-mini
 ```
+
+**LLM auth (choose one path):**
+
+1. **Direct OpenAI** (simplest):
+
+   ```bash
+   supabase secrets set OPENAI_API_KEY=sk-...
+   ```
+
+2. **Portkey** (recommended if you want keys/limits/routing in [Portkey](https://portkey.ai)): the Edge Function calls `https://api.portkey.ai/v1/chat/completions` with `x-portkey-api-key`.
+
+   **Virtual key** (OpenAI credential stays in Portkey’s vault):
+
+   ```bash
+   supabase secrets set PORTKEY_API_KEY=...        # Portkey API key from their dashboard
+   supabase secrets set PORTKEY_VIRTUAL_KEY=...    # Virtual key id for your OpenAI provider
+   ```
+
+   **Or** pass-through OpenAI key through Portkey:
+
+   ```bash
+   supabase secrets set PORTKEY_API_KEY=...
+   supabase secrets set OPENAI_API_KEY=sk-...      # Portkey forwards to OpenAI (x-portkey-provider: openai)
+   ```
+
+   **Or** Model Catalog slug (no raw OpenAI key in Supabase if Portkey is configured that way):
+
+   ```bash
+   supabase secrets set PORTKEY_API_KEY=...
+   supabase secrets set PORTKEY_PROVIDER=@openai-prod   # example; use your catalog slug
+   ```
+
+Secrets are read **only inside the Edge Function** (never in GitHub Pages). After any change: `supabase functions deploy mentor-backend --no-verify-jwt`.
 
 Deploy:
 
@@ -76,7 +111,9 @@ npm run dev
 
 ## Matching logic
 
-Matching runs in the **browser on the admin device** after applications are loaded from Supabase. The **rationale** is generated in TypeScript from the actual free-text answers (two paragraphs, with quoted excerpts). There is no third-party LLM call.
+**Match / Rematch** runs in the **`mentor-backend` Edge Function** using the **OpenAI Chat Completions** shape, either **directly** (`OPENAI_API_KEY`) or via the **Portkey** gateway (`PORTKEY_API_KEY` + virtual key or provider). Model defaults to `OPENAI_MODEL` or `gpt-4o-mini`. The model receives trimmed mentor/mentee JSON and returns pairs + rationales; the function validates capacity, duplicate mentees, and “no” availability before saving to `program_state`.
+
+The older heuristic matcher still exists in `src/lib/matching.ts` for reference but is **not** used by the admin UI anymore.
 
 ## Deploy to GitHub Pages
 
