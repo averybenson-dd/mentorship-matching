@@ -37,10 +37,7 @@ function edgeUserMessage(msg: string): string {
 
 function resolveMatchSetupError(msg: string): string {
   if (msg === "missing_llm_credentials") {
-    return "No LLM credentials configured. Set ANTHROPIC_API_KEY for Claude (API key from console.anthropic.com), or OPENAI_API_KEY for OpenAI, or Portkey secrets. Run: supabase secrets set … then supabase functions deploy mentor-backend --no-verify-jwt.";
-  }
-  if (msg === "missing_portkey_provider") {
-    return "PORTKEY_API_KEY is set but Portkey still needs routing: set OPENAI_API_KEY (used with x-portkey-provider: openai), or PORTKEY_VIRTUAL_KEY, or PORTKEY_PROVIDER alone. Redeploy mentor-backend, then retry.";
+    return "No LLM credentials configured. Set GEMINI_API_KEY (Google AI Studio), or ANTHROPIC_API_KEY, or OPENAI_API_KEY. Run: supabase secrets set … then supabase functions deploy mentor-backend --no-verify-jwt.";
   }
   if (msg === "llm_rationale_forbidden_score_language") {
     return "The model tried to describe fit with percentages or boilerplate that conflicts with the numeric score. Click Run AI match again (the prompt now forbids that); if it keeps happening, try a slightly larger model in OPENAI_MODEL.";
@@ -301,12 +298,10 @@ export default function AdminPage() {
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
           <strong>Match / Rematch</strong> calls an LLM from the <code>mentor-backend</code> Edge Function (not
-          your browser). If <code>ANTHROPIC_API_KEY</code> is set, matching uses <strong>Claude</strong> (API from
-          console.anthropic.com — not the same as a claude.ai chat subscription). Otherwise use{" "}
-          <code>OPENAI_API_KEY</code> and/or <strong>Portkey</strong> (<code>PORTKEY_API_KEY</code> + virtual key, or
-          pass-through OpenAI key, or <code>PORTKEY_PROVIDER</code> catalog slug — remove{" "}
-          <code>OPENAI_API_KEY</code> from Edge secrets if you want the slug to be used). Optional{" "}
-          <code>ANTHROPIC_MODEL</code> / <code>CLAUDE_MODEL</code> or <code>OPENAI_MODEL</code>. Redeploy after
+          your browser). If <code>GEMINI_API_KEY</code> (or <code>GOOGLE_AI_API_KEY</code>) is set, matching uses{" "}
+          <strong>Google Gemini</strong> from AI Studio. Otherwise <code>ANTHROPIC_API_KEY</code> (Claude API) or{" "}
+          <code>OPENAI_API_KEY</code> (direct OpenAI). Optional <code>GEMINI_MODEL</code>,{" "}
+          <code>ANTHROPIC_MODEL</code> / <code>CLAUDE_MODEL</code>, or <code>OPENAI_MODEL</code>. Redeploy after
           changing secrets.
         </p>
         {loadError && <div className="error">{loadError}</div>}
@@ -360,9 +355,8 @@ export default function AdminPage() {
         <h2>LLM / Portkey diagnostics</h2>
         <p className="muted">
           Shows how <code>mentor-backend</code> resolves credentials from Supabase secrets (keys are never returned).
-          <strong> Ping gateway</strong> runs one tiny request on the same path as matching (Anthropic Messages API
-          or OpenAI-style chat). If rationales feel generic, compare <code>modelReported</code> to your model env
-          and any Portkey virtual key defaults.
+          <strong> Ping gateway</strong> runs one tiny request on the same path as matching (Gemini generateContent,
+          Anthropic Messages, or OpenAI chat completions).
         </p>
         {llmPanelError && <div className="error">{llmPanelError}</div>}
         <div className="stack" style={{ marginTop: "0.75rem" }}>

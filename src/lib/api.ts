@@ -110,31 +110,26 @@ export async function getProgramState(adminPassword: string): Promise<ProgramSta
 export type LlmEnvSummary = {
   gateway: string;
   routing: string;
+  geminiModel: string;
+  geminiKeyPresent: boolean;
   openaiModel: string;
   anthropicModel: string;
   anthropicKeyPresent: boolean;
-  portkeyApiKeyPresent: boolean;
-  portkeyVirtualKeyPresent: boolean;
-  portkeyProviderPresent: boolean;
-  /** Normalized `x-portkey-provider` (catalog slugs get a leading `@`). */
-  portkeyProviderAsSent: string;
   openaiKeyPresent: boolean;
 };
 
-/** Reads Edge Function env wiring for Claude / OpenAI / Portkey (no keys returned). Admin only. */
+/** Reads Edge Function env wiring for Gemini / Anthropic / OpenAI (no keys returned). Admin only. */
 export async function getLlmConfig(adminPassword: string): Promise<LlmEnvSummary> {
   const out = await invoke({ action: "llmConfig" }, adminPassword);
   if (!out.ok) throw new Error("llm_config_failed");
   return {
     gateway: String(out.gateway),
     routing: String(out.routing),
+    geminiModel: String(out.geminiModel),
+    geminiKeyPresent: Boolean(out.geminiKeyPresent),
     openaiModel: String(out.openaiModel),
     anthropicModel: String(out.anthropicModel),
     anthropicKeyPresent: Boolean(out.anthropicKeyPresent),
-    portkeyApiKeyPresent: Boolean(out.portkeyApiKeyPresent),
-    portkeyVirtualKeyPresent: Boolean(out.portkeyVirtualKeyPresent),
-    portkeyProviderPresent: Boolean(out.portkeyProviderPresent),
-    portkeyProviderAsSent: typeof out.portkeyProviderAsSent === "string" ? out.portkeyProviderAsSent : "",
     openaiKeyPresent: Boolean(out.openaiKeyPresent),
   };
 }
@@ -151,7 +146,7 @@ export type LlmPingResult = {
   modelReported?: string | null;
 };
 
-/** One tiny completion via the same path as matching (Anthropic, Portkey, or OpenAI). Admin only. */
+/** One tiny completion via the same path as matching (Gemini, Anthropic, or OpenAI). Admin only. */
 export async function pingLlmGateway(adminPassword: string): Promise<LlmPingResult> {
   const out = (await invoke({ action: "llmPing" }, adminPassword)) as Record<string, unknown>;
   return {
@@ -175,7 +170,7 @@ export type RunAiMatchMeta = {
   modelReported: string | null;
 };
 
-/** Runs LLM matching on the server (Edge Function). Configure Anthropic and/or OpenAI/Portkey secrets — see README. */
+/** Runs LLM matching on the server (Edge Function). Configure Gemini and/or Anthropic/OpenAI secrets — see README. */
 export async function runAiMatch(adminPassword: string): Promise<{ llm?: RunAiMatchMeta }> {
   const out = await invoke({ action: "runAiMatch" }, adminPassword);
   if (!out.ok) throw new Error("ai_match_failed");

@@ -276,18 +276,36 @@ function validateLlmPairs(
   return out;
 }
 
-type LlmRouting =
-  | "anthropic_direct"
-  | "virtual_key"
-  | "provider_slug"
-  | "openai_via_portkey"
-  | "openai_direct";
+type LlmRouting = "gemini_direct" | "anthropic_direct" | "openai_direct";
 
 type LlmGatewayMeta = {
-  gateway: "anthropic" | "portkey" | "openai";
+  gateway: "gemini" | "anthropic" | "openai";
   routing: LlmRouting;
   chatUrlHost: string;
 };
+
+function getGeminiApiKey(): string | undefined {
+  return Deno.env.get("GEMINI_API_KEY")?.trim() ||
+    Deno.env.get("GOOGLE_AI_API_KEY")?.trim() ||
+    Deno.env.get("GOOGLE_API_KEY")?.trim() ||
+    undefined;
+}
+
+function extractGeminiText(json: Record<string, unknown>): string {
+  const candidates = json.candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) return "";
+  const c0 = candidates[0];
+  if (!isRecord(c0)) return "";
+  const content = c0.content;
+  if (!isRecord(content)) return "";
+  const parts = content.parts;
+  if (!Array.isArray(parts)) return "";
+  const texts: string[] = [];
+  for (const p of parts) {
+    if (isRecord(p) && typeof p.text === "string") texts.push(p.text);
+  }
+  return texts.join("");
+}
 
 function extractAnthropicText(json: Record<string, unknown>): string {
   const content = json.content;
@@ -308,38 +326,19 @@ function unwrapLeadingCodeFence(s: string): string {
   return t.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/u, "").trim();
 }
 
-/**
- * Portkey Model Catalog slugs must use `@name` on `x-portkey-provider` (see Portkey inference headers).
- * A bare value like `openai-dasher-logistics` often yields 403; `openai` / `anthropic` stay unchanged.
- */
-function formatPortkeyProviderHeader(slug: string): string {
-  const s = slug.trim();
-  if (!s) return s;
-  if (s.startsWith("@")) return s;
-  const bare = new Set(["openai", "anthropic", "azure-openai", "google", "groq", "together", "mistral", "cohere"]);
-  if (bare.has(s.toLowerCase())) return s;
-  return `@${s}`;
-}
-
 /** Non-secret snapshot for admin diagnostics (matches routing logic below). */
 function getLlmEnvSummary(): {
-  gateway: "anthropic" | "portkey" | "openai" | "none";
+  gateway: "gemini" | "anthropic" | "openai" | "none";
   routing: string;
+  geminiModel: string;
+  geminiKeyPresent: boolean;
   openaiModel: string;
   anthropicModel: string;
   anthropicKeyPresent: boolean;
-  portkeyApiKeyPresent: boolean;
-  portkeyVirtualKeyPresent: boolean;
-  portkeyProviderPresent: boolean;
-  /** Value sent on `x-portkey-provider` after catalog `@` normalization (empty if unused). */
-  portkeyProviderAsSent: string;
   openaiKeyPresent: boolean;
 } {
-  const portkeyApiKeyPresent = Boolean(Deno.env.get("PORTKEY_API_KEY")?.trim());
-  const portkeyVirtualKeyPresent = Boolean(Deno.env.get("PORTKEY_VIRTUAL_KEY")?.trim());
-  const rawProvider = Deno.env.get("PORTKEY_PROVIDER")?.trim() ?? "";
-  const portkeyProviderPresent = Boolean(rawProvider);
-  const portkeyProviderAsSent = portkeyProviderPresent ? formatPortkeyProviderHeader(rawProvider) : "";
+  const geminiKeyPresent = Boolean(getGeminiApiKey());
+  const geminiModel = Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-2.0-flash";
   const openaiKeyPresent = Boolean(Deno.env.get("OPENAI_API_KEY")?.trim());
   const anthropicKeyPresent = Boolean(Deno.env.get("ANTHROPIC_API_KEY")?.trim());
   const openaiModel = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
@@ -348,48 +347,56 @@ function getLlmEnvSummary(): {
     Deno.env.get("CLAUDE_MODEL")?.trim() ||
     "claude-3-5-sonnet-20241022";
 
+  if (geminiKeyPresent) {
+    return {
+      gateway: "gemini",
+      routing: "gemini_direct",
+      geminiModel,
+      geminiKeyPresent: true,
+      openaiModel,
+      anthropicModel,
+      anthropicKeyPresent,
+      openaiKeyPresent,
+    };
+  }
   if (anthropicKeyPresent) {
     return {
       gateway: "anthropic",
       routing: "anthropic_direct",
+      geminiModel,
+      geminiKeyPresent: false,
       openaiModel,
       anthropicModel,
       anthropicKeyPresent: true,
-      portkeyApiKeyPresent,
-      portkeyVirtualKeyPresent,
-      portkeyProviderPresent,
-      portkeyProviderAsSent,
       openaiKeyPresent,
     };
   }
-
-  let gateway: "portkey" | "openai" | "none" = "none";
+  let gateway: "openai" | "none" = "none";
   let routing = "missing_llm_credentials";
-  if (portkeyApiKeyPresent) {
-    gateway = "portkey";
-    if (portkeyVirtualKeyPresent) routing = "virtual_key";
-    else if (openaiKeyPresent) routing = "openai_via_portkey";
-    else if (portkeyProviderPresent) routing = "provider_slug";
-    else routing = "portkey_missing_virtual_key_provider_or_openai";
-  } else if (openaiKeyPresent) {
+  if (openaiKeyPresent) {
     gateway = "openai";
     routing = "openai_direct";
   }
   return {
     gateway,
     routing,
+    geminiModel,
+    geminiKeyPresent: false,
     openaiModel,
     anthropicModel,
     anthropicKeyPresent: false,
-    portkeyApiKeyPresent,
-    portkeyVirtualKeyPresent,
-    portkeyProviderPresent,
-    portkeyProviderAsSent,
     openaiKeyPresent,
   };
 }
 
 type LlmTransport =
+  | {
+    family: "gemini";
+    url: string;
+    headers: Record<string, string>;
+    meta: LlmGatewayMeta;
+    model: string;
+  }
   | {
     family: "anthropic";
     url: string;
@@ -405,8 +412,28 @@ type LlmTransport =
     model: string;
   };
 
-/** Prefer Anthropic (Claude API) when ANTHROPIC_API_KEY is set; else OpenAI-compatible (direct or Portkey). */
+/** Gemini (Google AI Studio) first, then Anthropic, then OpenAI direct. */
 function resolveLlmTransport(): LlmTransport {
+  const geminiKey = getGeminiApiKey();
+  if (geminiKey) {
+    const model = Deno.env.get("GEMINI_MODEL")?.trim() || "gemini-2.0-flash";
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+    return {
+      family: "gemini",
+      url,
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": geminiKey,
+      },
+      meta: {
+        gateway: "gemini",
+        routing: "gemini_direct",
+        chatUrlHost: "generativelanguage.googleapis.com",
+      },
+      model,
+    };
+  }
   const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")?.trim();
   if (anthropicKey) {
     const model =
@@ -429,54 +456,18 @@ function resolveLlmTransport(): LlmTransport {
       model,
     };
   }
-  const o = resolveChatCompletionsRequest();
-  const model = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
-  return { family: "openai_chat", url: o.url, headers: o.headers, meta: o.meta, model };
-}
-
-/** OpenAI direct, or Portkey gateway (https://docs.portkey.ai/docs/api-reference/headers). */
-function resolveChatCompletionsRequest(): {
-  url: string;
-  headers: Record<string, string>;
-  meta: LlmGatewayMeta;
-} {
-  const portkey = Deno.env.get("PORTKEY_API_KEY")?.trim();
-  const virtualKey = Deno.env.get("PORTKEY_VIRTUAL_KEY")?.trim();
   const openaiKey = Deno.env.get("OPENAI_API_KEY")?.trim();
-  const providerSlug = Deno.env.get("PORTKEY_PROVIDER")?.trim();
-
-  if (portkey) {
-    const headers: Record<string, string> = {
-      "x-portkey-api-key": portkey,
-      "Content-Type": "application/json",
-    };
-    let routing: LlmRouting;
-    if (virtualKey) {
-      headers["x-portkey-virtual-key"] = virtualKey;
-      routing = "virtual_key";
-    } else if (openaiKey) {
-      // Prefer your OpenAI key through Portkey; ignore PORTKEY_PROVIDER when both are set.
-      headers["x-portkey-provider"] = "openai";
-      headers["Authorization"] = `Bearer ${openaiKey}`;
-      routing = "openai_via_portkey";
-    } else if (providerSlug) {
-      headers["x-portkey-provider"] = formatPortkeyProviderHeader(providerSlug);
-      routing = "provider_slug";
-    } else {
-      throw new Error("missing_portkey_provider");
-    }
-    const url = "https://api.portkey.ai/v1/chat/completions";
-    return { url, headers, meta: { gateway: "portkey", routing, chatUrlHost: "api.portkey.ai" } };
-  }
   if (openaiKey) {
-    const url = "https://api.openai.com/v1/chat/completions";
+    const model = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
     return {
-      url,
+      family: "openai_chat",
+      url: "https://api.openai.com/v1/chat/completions",
       headers: {
         Authorization: `Bearer ${openaiKey}`,
         "Content-Type": "application/json",
       },
       meta: { gateway: "openai", routing: "openai_direct", chatUrlHost: "api.openai.com" },
+      model,
     };
   }
   throw new Error("missing_llm_credentials");
@@ -558,11 +549,23 @@ async function runAiMatchWithLlm(
   const systemForAnthropic =
     `${system} Output must be a single raw JSON object only (no markdown code fences, no text before or after the JSON).`;
 
+  const geminiBody = {
+    systemInstruction: { parts: [{ text: `${system} Output only valid JSON for the schema; no markdown fences.` }] },
+    contents: [{ role: "user", parts: [{ text: user }] }],
+    generationConfig: {
+      temperature: 0.22,
+      maxOutputTokens: 8192,
+      responseMimeType: "application/json",
+    },
+  };
+
   const oaRes = await fetch(transport.url, {
     method: "POST",
     headers: transport.headers,
     body: JSON.stringify(
-      transport.family === "anthropic"
+      transport.family === "gemini"
+        ? geminiBody
+        : transport.family === "anthropic"
         ? {
           model: transport.model,
           max_tokens: 8192,
@@ -586,7 +589,12 @@ async function runAiMatchWithLlm(
   const oaJson = (await oaRes.json()) as Record<string, unknown>;
   if (!oaRes.ok) {
     let msg: string;
-    if (transport.family === "anthropic") {
+    if (transport.family === "gemini") {
+      const er = oaJson.error;
+      msg = isRecord(er) && typeof er.message === "string"
+        ? String(er.message)
+        : JSON.stringify(oaJson);
+    } else if (transport.family === "anthropic") {
       const er = oaJson.error;
       msg = isRecord(er) && typeof er.message === "string"
         ? String(er.message)
@@ -601,7 +609,9 @@ async function runAiMatchWithLlm(
   }
 
   let content: string;
-  if (transport.family === "anthropic") {
+  if (transport.family === "gemini") {
+    content = unwrapLeadingCodeFence(extractGeminiText(oaJson));
+  } else if (transport.family === "anthropic") {
     content = unwrapLeadingCodeFence(extractAnthropicText(oaJson));
   } else {
     const choices = oaJson.choices as unknown[] | undefined;
@@ -633,8 +643,16 @@ async function runAiMatchWithLlm(
   );
   if (upErr) throw upErr;
 
-  const usage = isRecord(oaJson.usage) ? oaJson.usage : {};
-  const modelReported = typeof oaJson.model === "string" ? oaJson.model : null;
+  const usage = transport.family === "gemini" && isRecord(oaJson.usageMetadata)
+    ? oaJson.usageMetadata
+    : isRecord(oaJson.usage)
+    ? oaJson.usage
+    : {};
+  const modelReported = transport.family === "gemini"
+    ? (typeof oaJson.modelVersion === "string" ? oaJson.modelVersion : null)
+    : typeof oaJson.model === "string"
+    ? oaJson.model
+    : null;
   return {
     matches: matches as unknown as Json[],
     model,
@@ -767,7 +785,7 @@ Deno.serve(async (req) => {
 
     if (action === "llmPing") {
       const env = getLlmEnvSummary();
-      if (env.gateway === "none" || (env.gateway === "portkey" && env.routing.startsWith("portkey_missing"))) {
+      if (env.gateway === "none") {
         return jsonResponse({ ok: false, error: env.routing });
       }
       let transport: LlmTransport;
@@ -783,7 +801,12 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: transport.headers,
         body: JSON.stringify(
-          transport.family === "anthropic"
+          transport.family === "gemini"
+            ? {
+              contents: [{ role: "user", parts: [{ text: "Reply with exactly: ok" }] }],
+              generationConfig: { maxOutputTokens: 24, temperature: 0 },
+            }
+            : transport.family === "anthropic"
             ? {
               model: transport.model,
               max_tokens: 20,
@@ -805,8 +828,16 @@ Deno.serve(async (req) => {
       } catch {
         /* body not json */
       }
-      const modelReported = typeof oaJson.model === "string" ? oaJson.model : null;
-      const errMsg = transport.family === "anthropic"
+      const modelReported = transport.family === "gemini"
+        ? (typeof oaJson.modelVersion === "string" ? oaJson.modelVersion : null)
+        : typeof oaJson.model === "string"
+        ? oaJson.model
+        : null;
+      const errMsg = transport.family === "gemini"
+        ? (isRecord(oaJson.error) && typeof (oaJson.error as Record<string, unknown>).message === "string"
+          ? String((oaJson.error as Record<string, unknown>).message)
+          : null)
+        : transport.family === "anthropic"
         ? (isRecord(oaJson.error) && typeof (oaJson.error as Record<string, unknown>).message === "string"
           ? String((oaJson.error as Record<string, unknown>).message)
           : null)
@@ -937,11 +968,7 @@ Deno.serve(async (req) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "error";
     if (msg === "unauthorized") return jsonResponse({ ok: false, error: "unauthorized" }, 401);
-    if (
-      msg === "missing_llm_credentials" ||
-      msg === "missing_portkey_provider" ||
-      msg === "need_at_least_one_mentor_and_one_mentee"
-    ) {
+    if (msg === "missing_llm_credentials" || msg === "need_at_least_one_mentor_and_one_mentee") {
       return jsonResponse({ ok: false, error: msg }, 400);
     }
     if (msg.startsWith("llm_")) {

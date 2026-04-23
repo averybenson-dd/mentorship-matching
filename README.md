@@ -28,59 +28,31 @@ Set secrets (use a strong admin password in production; for the stock app use `a
 
 ```bash
 supabase secrets set ADMIN_PASSWORD=admin1999
-# optional: defaults to gpt-4o-mini
-supabase secrets set OPENAI_MODEL=gpt-4o-mini
 ```
 
-**LLM auth (choose one path):**
+**LLM auth (priority: Gemini → Anthropic → OpenAI)**
 
-1. **Anthropic Claude (API)** — uses the [Messages API](https://docs.anthropic.com/en/api/messages). This is **billing in Anthropic Console**, not the same as a personal **claude.ai** chat subscription (those do not expose an API key to your app).
+1. **Google Gemini ([AI Studio](https://aistudio.google.com/apikey))** — default when `GEMINI_API_KEY`, `GOOGLE_AI_API_KEY`, or `GOOGLE_API_KEY` is set. Uses the [Generative Language API](https://ai.google.dev/api/rest) (`generateContent`, JSON output).
+
+   ```bash
+   supabase secrets set GEMINI_API_KEY=...   # API key from Google AI Studio
+   # optional; default gemini-2.0-flash
+   supabase secrets set GEMINI_MODEL=gemini-2.0-flash
+   ```
+
+2. **Anthropic Claude** — if no Gemini key, uses `ANTHROPIC_API_KEY` ([Console](https://console.anthropic.com/)); not the same as a consumer claude.ai-only subscription.
 
    ```bash
    supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-   # optional; default claude-3-5-sonnet-20241022
-   supabase secrets set ANTHROPIC_MODEL=claude-sonnet-4-20250514
+   supabase secrets set ANTHROPIC_MODEL=claude-3-5-sonnet-20241022   # optional
    ```
 
-   If `ANTHROPIC_API_KEY` is set, the Edge Function **ignores** OpenAI/Portkey for matching.
-
-2. **Direct OpenAI**:
+3. **Direct OpenAI** — if neither Gemini nor Anthropic keys are set:
 
    ```bash
    supabase secrets set OPENAI_API_KEY=sk-...
+   supabase secrets set OPENAI_MODEL=gpt-4o-mini   # optional
    ```
-
-3. **Portkey** (optional; keys/limits/routing in [Portkey](https://portkey.ai)): the Edge Function calls `https://api.portkey.ai/v1/chat/completions` with `x-portkey-api-key`. Only used when **`ANTHROPIC_API_KEY` is not set**.
-
-   **Virtual key** (OpenAI credential stays in Portkey’s vault):
-
-   ```bash
-   supabase secrets set PORTKEY_API_KEY=...        # Portkey API key from their dashboard
-   supabase secrets set PORTKEY_VIRTUAL_KEY=...    # Virtual key id for your OpenAI provider
-   ```
-
-   **Or** pass-through OpenAI key through Portkey:
-
-   ```bash
-   supabase secrets set PORTKEY_API_KEY=...
-   supabase secrets set OPENAI_API_KEY=sk-...      # Portkey forwards to OpenAI (x-portkey-provider: openai)
-   ```
-
-   **Or** Model Catalog slug (OpenAI-style chat; credentials live in Portkey, not in Supabase):
-
-   ```bash
-   supabase secrets set PORTKEY_API_KEY=...   # same workspace key you use in Portkey
-   supabase secrets set PORTKEY_PROVIDER=openai-dasher-logistics   # catalog slug; Edge prefixes `@` on `x-portkey-provider` if missing
-   supabase secrets set OPENAI_MODEL=gpt-4o-mini   # short model id in the JSON body (Portkey docs use this with `@slug` on the provider header)
-
-   **Or** use Portkey’s combined model id as the body `model` (still set `PORTKEY_API_KEY`; you can keep or omit `PORTKEY_PROVIDER` depending on what Portkey expects for your workspace):
-
-   ```bash
-   supabase secrets set OPENAI_MODEL=@openai-dasher-logistics/gpt-4o-mini
-   ```
-   ```
-
-   **Routing priority** (no virtual key): if `OPENAI_API_KEY` is set, it wins over **`PORTKEY_PROVIDER`**. If `ANTHROPIC_API_KEY` is set, Anthropic wins over Portkey entirely. For **catalog-only**, remove `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from Edge secrets so only `PORTKEY_API_KEY` + `PORTKEY_PROVIDER` apply.
 
 Secrets are read **only inside the Edge Function** (never in GitHub Pages). After any change: `supabase functions deploy mentor-backend --no-verify-jwt`.
 
@@ -130,7 +102,7 @@ npm run dev
 
 ## Matching logic
 
-**Match / Rematch** runs in the **`mentor-backend` Edge Function** using the **OpenAI Chat Completions** shape, either **directly** (`OPENAI_API_KEY`) or via the **Portkey** gateway (`PORTKEY_API_KEY` + virtual key or provider). Model defaults to `OPENAI_MODEL` or `gpt-4o-mini`. The model receives trimmed mentor/mentee JSON and returns pairs + rationales; the function validates capacity, duplicate mentees, and “no” availability before saving to `program_state`.
+**Match / Rematch** runs in the **`mentor-backend` Edge Function**: **Gemini** (`GEMINI_API_KEY` / `GOOGLE_AI_API_KEY`, `GEMINI_MODEL`), else **Anthropic** Messages, else **OpenAI** Chat Completions. The model receives trimmed mentor/mentee JSON and returns pairs + rationales; the function validates capacity, duplicate mentees, and “no” availability before saving to `program_state`.
 
 The older heuristic matcher still exists in `src/lib/matching.ts` for reference but is **not** used by the admin UI anymore.
 
