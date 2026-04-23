@@ -345,18 +345,20 @@ export default function AdminPage() {
                 · upstream reported <code>{lastMatchLlm.modelReported}</code>
               </>
             ) : (
-              <> · upstream did not echo a model id (check Portkey logs).</>
+              <> · upstream did not echo a model id.</>
             )}
           </p>
         )}
       </div>
 
       <div className="card">
-        <h2>LLM / Portkey diagnostics</h2>
+        <h2>LLM diagnostics</h2>
         <p className="muted">
           Shows how <code>mentor-backend</code> resolves credentials from Supabase secrets (keys are never returned).
           <strong> Ping gateway</strong> runs one tiny request on the same path as matching (Gemini generateContent,
-          Anthropic Messages, or OpenAI chat completions).
+          Anthropic Messages, or OpenAI chat completions). If you still see <code>portkey</code> here, the Edge
+          function on Supabase is an <strong>old deploy</strong> — run{" "}
+          <code>supabase functions deploy mentor-backend --no-verify-jwt</code> from the latest repo.
         </p>
         {llmPanelError && <div className="error">{llmPanelError}</div>}
         <div className="stack" style={{ marginTop: "0.75rem" }}>

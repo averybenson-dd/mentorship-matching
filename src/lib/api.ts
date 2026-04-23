@@ -125,7 +125,7 @@ export async function getLlmConfig(adminPassword: string): Promise<LlmEnvSummary
   return {
     gateway: String(out.gateway),
     routing: String(out.routing),
-    geminiModel: String(out.geminiModel),
+    geminiModel: typeof out.geminiModel === "string" ? out.geminiModel : "",
     geminiKeyPresent: Boolean(out.geminiKeyPresent),
     openaiModel: String(out.openaiModel),
     anthropicModel: String(out.anthropicModel),
