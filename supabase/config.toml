@@ -1,0 +1,7 @@
+# Replace project_id after linking with `supabase link`, or leave as placeholder for manual deploy.
+
+[api]
+enabled = true
+
+[functions.mentor-backend]
+verify_jwt = false

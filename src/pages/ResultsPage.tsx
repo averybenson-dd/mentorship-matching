@@ -1,38 +1,76 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { findMatchForPerson } from "../lib/matching";
-import { getProgramState, listApplications } from "../lib/storage";
-import type { Role } from "../types";
+import BackendRequired from "../components/BackendRequired";
+import {
+  backendConfigured,
+  fetchProgramPublished,
+  lookupMatchesByEmail,
+  type LookupMatchItem,
+} from "../lib/api";
+import { isValidEmail } from "../lib/email";
 
 export default function ResultsPage() {
-  const [name, setName] = useState("");
-  const [role, setRole] = useState<Role | "either">("either");
+  const [email, setEmail] = useState("");
+  const [published, setPublished] = useState<boolean | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ReturnType<typeof findMatchForPerson>>(null);
+  const [items, setItems] = useState<LookupMatchItem[] | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const program = getProgramState();
+  useEffect(() => {
+    if (!backendConfigured()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await fetchProgramPublished();
+        if (!cancelled) setPublished(p);
+      } catch {
+        if (!cancelled) {
+          setLoadError("Could not load program status. Please try again later.");
+          setPublished(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  function onSubmit(e: FormEvent) {
+  if (!backendConfigured()) {
+    return <BackendRequired title="Results lookup unavailable" />;
+  }
+
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    setResult(null);
-    if (!program.published) {
-      setError("Results are not published yet. Please check back after program administrators publish matches.");
+    setItems(null);
+    if (!isValidEmail(email)) {
+      setError("Enter the same work email you used on your application.");
       return;
     }
-    if (!name.trim()) {
-      setError("Enter the name you used on your application.");
-      return;
+    setSubmitting(true);
+    try {
+      const res = await lookupMatchesByEmail(email);
+      if (!res.published) {
+        setError(
+          "Results are not published yet. Please check back after program administrators publish matches.",
+        );
+        setPublished(false);
+        return;
+      }
+      setPublished(true);
+      if (res.items.length === 0) {
+        setError(
+          "No published match was found for that email. Confirm you used the same email as your application, or ask an admin to rematch.",
+        );
+        return;
+      }
+      setItems(res.items);
+    } catch {
+      setError("Lookup failed. Please try again.");
+    } finally {
+      setSubmitting(false);
     }
-    const apps = listApplications();
-    const hit = findMatchForPerson(apps, program.matches, name, role);
-    if (!hit) {
-      setError(
-        "No published match found for that name. If you recently applied, confirm spelling or ask an admin to rematch.",
-      );
-      return;
-    }
-    setResult(hit);
   }
 
   return (
@@ -40,51 +78,31 @@ export default function ResultsPage() {
       <div className="card">
         <h1>My match</h1>
         <p className="lead">
-          After administrators publish pairings, look up your match using the same name you entered
-          on your application.
+          After administrators publish pairings, look up your match using the same work email you
+          used when you applied.
         </p>
-        {!program.published && (
+        {loadError && <div className="error">{loadError}</div>}
+        {published === false && !loadError && (
           <div className="notice">
-            Matching results are not visible yet. You will see a confirmation message here once the
-            program is published.
+            Matching results are not visible yet. You will be able to look up your pairing here once
+            the program is published.
           </div>
         )}
         <form onSubmit={onSubmit}>
           <div className="field">
-            <label htmlFor="lookup-name">Your name (as on the application) *</label>
+            <label htmlFor="lookup-email">Work email (same as on your application) *</label>
             <input
-              id="lookup-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoComplete="name"
+              id="lookup-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
             />
-          </div>
-          <div className="field">
-            <label>I applied as</label>
-            <div className="radio-grid">
-              {(
-                [
-                  ["either", "Not sure / only one application"],
-                  ["mentor", "Mentor"],
-                  ["mentee", "Mentee"],
-                ] as const
-              ).map(([value, label]) => (
-                <label key={value} className="radio-line">
-                  <input
-                    type="radio"
-                    name="lookup-role"
-                    checked={role === value}
-                    onChange={() => setRole(value)}
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
           </div>
           {error && <div className="error">{error}</div>}
           <div className="stack">
-            <button className="btn primary" type="submit" disabled={!program.published}>
-              Look up match
+            <button className="btn primary" type="submit" disabled={submitting || published === false}>
+              {submitting ? "Looking up…" : "Look up match"}
             </button>
             <Link className="btn secondary" to="/apply">
               Apply
@@ -93,21 +111,23 @@ export default function ResultsPage() {
         </form>
       </div>
 
-      {result && (
+      {items && items.length > 0 && (
         <div className="card">
-          <h2>Your pairing</h2>
-          <p>
-            <span className="pill">{result.self.payload.role}</span>{" "}
-            <strong>{result.self.payload.name}</strong>
-          </p>
-          <p>
-            Matched with <strong>{result.counterpart.payload.name}</strong> (
-            <span className="pill neutral">{result.counterpart.payload.role}</span>)
-          </p>
-          <h2>Why we think this is a strong fit</h2>
-          <p className="muted" style={{ marginTop: 0 }}>
-            {result.rationale}
-          </p>
+          <h2>Your pairing(s)</h2>
+          {items.map((it, idx) => (
+            <div key={`${it.yourRole}-${idx}`} style={{ marginTop: idx === 0 ? 0 : "1.5rem" }}>
+              <p>
+                <span className="pill">{it.yourRole}</span>{" "}
+                <strong>{it.yourName}</strong>
+              </p>
+              <p>
+                Matched with <strong>{it.counterpartName}</strong> (
+                <span className="pill neutral">{it.counterpartRole}</span>)
+              </p>
+              <h2>Why we think this is a strong fit</h2>
+              <p className="muted preline">{it.rationale}</p>
+            </div>
+          ))}
         </div>
       )}
     </div>

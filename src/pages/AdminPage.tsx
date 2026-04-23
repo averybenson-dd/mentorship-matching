@@ -1,18 +1,19 @@
-import { FormEvent, useCallback, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { DOORDASH_VALUES } from "../constants";
-import { isAdminAuthenticated, loginAdmin, logoutAdmin } from "../lib/adminSession";
-import { runMatching } from "../lib/matching";
+import BackendRequired from "../components/BackendRequired";
 import {
+  backendConfigured,
   deleteApplication,
-  exportDatabaseJson,
-  importDatabaseJson,
-  listApplications,
-  updateApplication,
+  exportSnapshot,
   getProgramState,
+  listApplications,
   setProgramState,
-} from "../lib/storage";
-import type { ApplicationPayload, StoredApplication } from "../types";
+  updateApplication,
+} from "../lib/api";
+import { getAdminPassword, isAdminAuthenticated, loginAdmin, logoutAdmin } from "../lib/adminSession";
+import { runMatching } from "../lib/matching";
+import type { ApplicationPayload, ProgramState, StoredApplication } from "../types";
 
 type ModalMode = "none" | "delete" | "edit";
 
@@ -22,9 +23,14 @@ export default function AdminPage() {
   const [pwd, setPwd] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [auth, setAuth] = useState(isAdminAuthenticated());
-  const [rows, setRows] = useState<StoredApplication[]>(() => listApplications());
-  const [program, setProgram] = useState(() => getProgramState());
+  const [rows, setRows] = useState<StoredApplication[]>([]);
+  const [program, setProgram] = useState<ProgramState>(() => ({
+    published: false,
+    matches: [],
+    updatedAt: new Date().toISOString(),
+  }));
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [modal, setModal] = useState<ModalMode>("none");
   const [active, setActive] = useState<StoredApplication | null>(null);
@@ -32,10 +38,22 @@ export default function AdminPage() {
   const [deleteAck, setDeleteAck] = useState(false);
   const [editJson, setEditJson] = useState("");
 
-  const refresh = useCallback(() => {
-    setRows(listApplications());
-    setProgram(getProgramState());
+  const refresh = useCallback(async () => {
+    const ap = getAdminPassword();
+    if (!ap) return;
+    setLoadError(null);
+    try {
+      const [apps, prog] = await Promise.all([listApplications(ap), getProgramState(ap)]);
+      setRows(apps);
+      setProgram(prog);
+    } catch {
+      setLoadError("Could not load data from Supabase. Check the Edge Function and secrets.");
+    }
   }, []);
+
+  useEffect(() => {
+    if (auth && getAdminPassword()) void refresh();
+  }, [auth, refresh]);
 
   const onLogin = (e: FormEvent) => {
     e.preventDefault();
@@ -43,7 +61,7 @@ export default function AdminPage() {
     if (loginAdmin(pwd)) {
       setAuth(true);
       setPwd("");
-      refresh();
+      void refresh();
     } else {
       setLoginError("Incorrect password.");
     }
@@ -52,41 +70,60 @@ export default function AdminPage() {
   const onLogout = () => {
     logoutAdmin();
     setAuth(false);
+    setRows([]);
+    setProgram({ published: false, matches: [], updatedAt: new Date().toISOString() });
   };
 
-  const onMatch = () => {
+  const requirePwd = () => {
+    const ap = getAdminPassword();
+    if (!ap) {
+      onLogout();
+      return null;
+    }
+    return ap;
+  };
+
+  const onMatch = async () => {
+    const ap = requirePwd();
+    if (!ap) return;
     setBusy(true);
     try {
-      const apps = listApplications();
+      const apps = await listApplications(ap);
       const matches = runMatching(apps);
-      const cur = getProgramState();
-      setProgramState({ ...cur, matches });
-      refresh();
+      const cur = await getProgramState(ap);
+      await setProgramState(ap, { ...cur, matches });
+      await refresh();
     } finally {
       setBusy(false);
     }
   };
 
-  const onPublish = () => {
-    const cur = getProgramState();
-    setProgramState({ ...cur, published: true });
-    refresh();
+  const onPublish = async () => {
+    const ap = requirePwd();
+    if (!ap) return;
+    const cur = await getProgramState(ap);
+    await setProgramState(ap, { ...cur, published: true });
+    await refresh();
   };
 
-  const onUnpublish = () => {
-    const cur = getProgramState();
-    setProgramState({ ...cur, published: false });
-    refresh();
+  const onUnpublish = async () => {
+    const ap = requirePwd();
+    if (!ap) return;
+    const cur = await getProgramState(ap);
+    await setProgramState(ap, { ...cur, published: false });
+    await refresh();
   };
 
-  const onRematch = () => {
+  const onRematch = async () => {
+    const ap = requirePwd();
+    if (!ap) return;
     setBusy(true);
     try {
-      const apps = listApplications();
+      const apps = await listApplications(ap);
       const matches = runMatching(apps);
-      const cur = getProgramState();
-      setProgramState({ ...cur, matches });
-      refresh();
+      const cur = await getProgramState(ap);
+      await setProgramState(ap, { ...cur, matches });
+      await refresh();
     } finally {
       setBusy(false);
     }
@@ -99,14 +136,15 @@ export default function AdminPage() {
     setModal("delete");
   };
 
-  const confirmDelete = () => {
-    if (!active) return;
+  const confirmDelete = async () => {
+    const ap = requirePwd();
+    if (!ap || !active) return;
     if (deleteInput.trim() !== DELETE_PHRASE) return;
     if (!deleteAck) return;
-    deleteApplication(active.id);
+    await deleteApplication(ap, active.id);
     setModal("none");
     setActive(null);
-    refresh();
+    await refresh();
   };
 
   const openEdit = (row: StoredApplication) => {
@@ -115,20 +153,21 @@ export default function AdminPage() {
     setModal("edit");
   };
 
-  const saveEdit = () => {
-    if (!active) return;
+  const saveEdit = async () => {
+    const ap = requirePwd();
+    if (!ap || !active) return;
     try {
       const parsed = JSON.parse(editJson) as ApplicationPayload;
       if (parsed.role !== "mentor" && parsed.role !== "mentee") {
         alert("Invalid role.");
         return;
       }
-      updateApplication(active.id, parsed);
+      await updateApplication(ap, active.id, parsed);
       setModal("none");
       setActive(null);
-      refresh();
+      await refresh();
     } catch {
-      alert("Invalid JSON.");
+      alert("Invalid JSON or save failed.");
     }
   };
 
@@ -137,6 +176,10 @@ export default function AdminPage() {
     const mentees = rows.filter((r) => r.payload.role === "mentee").length;
     return { mentors, mentees, matches: program.matches.length };
   }, [rows, program.matches.length]);
+
+  if (!backendConfigured()) {
+    return <BackendRequired title="Admin unavailable" />;
+  }
 
   if (!auth) {
     return (
@@ -181,51 +224,54 @@ export default function AdminPage() {
           </div>
         </div>
         <div className="notice">
-          Data is stored in this browser&apos;s <code>localStorage</code> for this deployment. For a
-          shared team database, host a small backend or use the optional Supabase setup described in{" "}
-          <code>README.md</code>.
+          Applications and matches are stored in <strong>Supabase</strong> (Postgres) so any browser
+          sees the same data. The admin password is checked by the Edge Function using the{" "}
+          <code>ADMIN_PASSWORD</code> secret — rotate it for anything beyond a trusted pilot.
         </div>
+        {loadError && <div className="error">{loadError}</div>}
         <p className="muted" style={{ marginTop: 0 }}>
           Mentors: {summary.mentors} · Mentees: {summary.mentees} · Active matches:{" "}
           {summary.matches} · Published: {program.published ? "yes" : "no"}
         </p>
         <div className="stack">
-          <button type="button" className="btn primary" disabled={busy} onClick={onMatch}>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void onMatch()}>
             Match
           </button>
-          <button type="button" className="btn" disabled={busy || program.published} onClick={onPublish}>
+          <button type="button" className="btn" disabled={busy || program.published} onClick={() => void onPublish()}>
             Publish
           </button>
           <button
             type="button"
             className="btn secondary"
             disabled={!program.published}
-            onClick={onUnpublish}
+            onClick={() => void onUnpublish()}
           >
             Unpublish
           </button>
-          <button type="button" className="btn ghost" disabled={busy} onClick={onRematch}>
+          <button type="button" className="btn ghost" disabled={busy} onClick={() => void onRematch()}>
             Rematch
           </button>
         </div>
         <p className="muted" style={{ marginBottom: 0 }}>
           Matching scores coaching/teaching text overlap, mentee value goals vs mentor superpower,
-          mutual availability, and each mentor&apos;s mentee capacity.
+          mutual availability, and each mentor&apos;s mentee capacity. Rationales are generated from the
+          text of both applications.
         </p>
       </div>
 
       <div className="card">
-        <h2>Backup / restore</h2>
+        <h2>Export snapshot</h2>
         <p className="muted">
-          Coordinators can move data between browsers by exporting JSON and importing elsewhere
-          (admin access required on the destination).
+          Downloads the currently loaded applications and program state as JSON (useful for backups).
         </p>
         <div className="stack">
           <button
             type="button"
             className="btn secondary"
             onClick={() => {
-              const blob = new Blob([exportDatabaseJson()], { type: "application/json" });
+              const ap = getAdminPassword();
+              if (!ap) return;
+              const blob = new Blob([exportSnapshot(rows, program)], { type: "application/json" });
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
               a.href = url;
@@ -236,26 +282,6 @@ export default function AdminPage() {
           >
             Export JSON
           </button>
-          <label className="btn secondary" style={{ cursor: "pointer" }}>
-            Import JSON
-            <input
-              type="file"
-              accept="application/json"
-              hidden
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                const text = await file.text();
-                const res = importDatabaseJson(text);
-                if (!res.ok) {
-                  alert(res.error);
-                  return;
-                }
-                refresh();
-              }}
-            />
-          </label>
         </div>
       </div>
 
@@ -266,6 +292,7 @@ export default function AdminPage() {
             <thead>
               <tr>
                 <th>Role</th>
+                <th>Email</th>
                 <th>Name</th>
                 <th>Region</th>
                 <th>Highlights</th>
@@ -281,6 +308,7 @@ export default function AdminPage() {
                       {r.payload.role}
                     </span>
                   </td>
+                  <td>{r.email}</td>
                   <td>{r.payload.name}</td>
                   <td>{r.payload.region}</td>
                   <td className="muted">{previewPayload(r.payload)}</td>
@@ -299,7 +327,7 @@ export default function AdminPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={7} className="muted">
                     No applications yet.
                   </td>
                 </tr>
@@ -333,7 +361,7 @@ export default function AdminPage() {
                       <td>{mentor?.payload.name ?? m.mentorId}</td>
                       <td>{mentee?.payload.name ?? m.menteeId}</td>
                       <td>{m.score}</td>
-                      <td className="muted">{m.rationale}</td>
+                      <td className="muted preline">{m.rationale}</td>
                     </tr>
                   );
                 })}
@@ -377,7 +405,7 @@ export default function AdminPage() {
                 type="button"
                 className="btn danger"
                 disabled={deleteInput.trim() !== DELETE_PHRASE || !deleteAck}
-                onClick={confirmDelete}
+                onClick={() => void confirmDelete()}
               >
                 Permanently delete
               </button>
@@ -400,15 +428,15 @@ export default function AdminPage() {
           <div className="modal" role="dialog" onMouseDown={(e) => e.stopPropagation()}>
             <h3>Edit application JSON</h3>
             <p className="muted">
-              Advanced editing — invalid JSON or shapes will be rejected. Prefer re-submitting from
-              the public form when possible.
+              Advanced editing — invalid JSON or shapes will be rejected. Include the correct{" "}
+              <code>email</code> field in the payload.
             </p>
             <div className="field">
               <label htmlFor="edit-json">Payload</label>
               <textarea id="edit-json" value={editJson} onChange={(e) => setEditJson(e.target.value)} />
             </div>
             <div className="stack">
-              <button type="button" className="btn primary" onClick={saveEdit}>
+              <button type="button" className="btn primary" onClick={() => void saveEdit()}>
                 Save changes
               </button>
               <button type="button" className="btn secondary" onClick={() => setModal("none")}>

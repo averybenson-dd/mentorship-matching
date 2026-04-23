@@ -7,7 +7,9 @@ import {
   MENTEE_JOB_TITLES,
   MENTOR_MENTEE_CAPACITY,
 } from "../constants";
-import { addApplication } from "../lib/storage";
+import BackendRequired from "../components/BackendRequired";
+import { backendConfigured, submitApplication } from "../lib/api";
+import { isValidEmail } from "../lib/email";
 import type {
   MentorApplication,
   MenteeApplication,
@@ -18,10 +20,10 @@ import type {
 } from "../types";
 
 const initialMentor: Omit<MentorApplication, "role"> = {
+  email: "",
   name: "",
   region: "",
   jobTitle: "",
-  managerName: "",
   commitment: "yes",
   menteeCapacity: 2,
   valueSuperpower: 1,
@@ -31,11 +33,11 @@ const initialMentor: Omit<MentorApplication, "role"> = {
 };
 
 const initialMentee: Omit<MenteeApplication, "role"> = {
+  email: "",
   name: "",
   region: "",
   jobTitle: "Associate",
   jobTitleOther: "",
-  managerName: "",
   team: "",
   commitment: "yes",
   valuesToDevelop: [],
@@ -50,12 +52,17 @@ export default function ApplyPage() {
   const [mentee, setMentee] = useState(initialMentee);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const title = useMemo(() => {
     if (role === "mentor") return "Mentor application";
     if (role === "mentee") return "Mentee application";
     return "Application";
   }, [role]);
+
+  if (!backendConfigured()) {
+    return <BackendRequired title="Applications unavailable" />;
+  }
 
   function toggleMenteeValue(idx: number) {
     setMentee((m) => {
@@ -67,7 +74,7 @@ export default function ApplyPage() {
     });
   }
 
-  function onSubmit(e: FormEvent) {
+  async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (!role) {
@@ -75,18 +82,34 @@ export default function ApplyPage() {
       return;
     }
     if (role === "mentor") {
+      if (!isValidEmail(mentor.email)) {
+        setError("Please enter a valid work email.");
+        return;
+      }
       if (!mentor.name.trim() || !mentor.region.trim() || !mentor.jobTitle.trim()) {
         setError("Please complete all required mentor fields.");
         return;
       }
-      if (!mentor.managerName.trim() || !mentor.teachingAreas.trim() || !mentor.favoriteOrder.trim()) {
+      if (!mentor.teachingAreas.trim() || !mentor.favoriteOrder.trim()) {
         setError("Please complete all required mentor fields.");
         return;
       }
       const payload: MentorApplication = { role: "mentor", ...mentor };
-      addApplication(payload);
+      setSubmitting(true);
+      try {
+        await submitApplication(payload);
+        setDone(true);
+      } catch {
+        setError("Could not save your application. Please try again or contact the program team.");
+      } finally {
+        setSubmitting(false);
+      }
     } else {
-      if (!mentee.name.trim() || !mentee.region.trim() || !mentee.managerName.trim() || !mentee.team.trim()) {
+      if (!isValidEmail(mentee.email)) {
+        setError("Please enter a valid work email.");
+        return;
+      }
+      if (!mentee.name.trim() || !mentee.region.trim() || !mentee.team.trim()) {
         setError("Please complete all required mentee fields.");
         return;
       }
@@ -103,21 +126,40 @@ export default function ApplyPage() {
         return;
       }
       const payload: MenteeApplication = { role: "mentee", ...mentee };
-      addApplication(payload);
+      setSubmitting(true);
+      try {
+        await submitApplication(payload);
+        setDone(true);
+      } catch {
+        setError("Could not save your application. Please try again or contact the program team.");
+      } finally {
+        setSubmitting(false);
+      }
     }
-    setDone(true);
   }
 
   if (done) {
     return (
       <div className="card">
         <h1>Thank you</h1>
-        <p className="lead">Your application was saved. Program administrators will follow up.</p>
+        <p className="lead">
+          Your application was saved to the shared program database. Administrators will follow up,
+          and you can look up your match later using the same email address.
+        </p>
         <div className="row">
           <Link className="btn secondary" to="/">
             Home
           </Link>
-          <button type="button" className="btn" onClick={() => { setDone(false); setRole(""); }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setDone(false);
+              setRole("");
+              setMentor(initialMentor);
+              setMentee(initialMentee);
+            }}
+          >
             Submit another
           </button>
         </div>
@@ -130,7 +172,8 @@ export default function ApplyPage() {
       <h1>{title}</h1>
       <p className="lead">
         Senior managers and above with at least six months of tenure are eligible to mentor. The
-        program pairs people based on development goals and mentor strengths.
+        program pairs people based on development goals and mentor strengths. Use the same work
+        email for your application and for results lookup.
       </p>
 
       <div className="field">
@@ -152,6 +195,17 @@ export default function ApplyPage() {
 
       {role === "mentor" && (
         <>
+          <div className="field">
+            <label htmlFor="m-email">Work email (used for results lookup) *</label>
+            <input
+              id="m-email"
+              type="email"
+              autoComplete="email"
+              value={mentor.email}
+              onChange={(e) => setMentor({ ...mentor, email: e.target.value })}
+              required
+            />
+          </div>
           <div className="field">
             <label htmlFor="m-name">Name *</label>
             <input
@@ -176,15 +230,6 @@ export default function ApplyPage() {
               id="m-title"
               value={mentor.jobTitle}
               onChange={(e) => setMentor({ ...mentor, jobTitle: e.target.value })}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="m-mgr">Manager&apos;s name *</label>
-            <input
-              id="m-mgr"
-              value={mentor.managerName}
-              onChange={(e) => setMentor({ ...mentor, managerName: e.target.value })}
               required
             />
           </div>
@@ -276,6 +321,17 @@ export default function ApplyPage() {
       {role === "mentee" && (
         <>
           <div className="field">
+            <label htmlFor="e-email">Work email (used for results lookup) *</label>
+            <input
+              id="e-email"
+              type="email"
+              autoComplete="email"
+              value={mentee.email}
+              onChange={(e) => setMentee({ ...mentee, email: e.target.value })}
+              required
+            />
+          </div>
+          <div className="field">
             <label htmlFor="e-name">Name *</label>
             <input
               id="e-name"
@@ -319,15 +375,6 @@ export default function ApplyPage() {
               />
             </div>
           )}
-          <div className="field">
-            <label htmlFor="e-mgr">Manager&apos;s name *</label>
-            <input
-              id="e-mgr"
-              value={mentee.managerName}
-              onChange={(e) => setMentee({ ...mentee, managerName: e.target.value })}
-              required
-            />
-          </div>
           <div className="field">
             <label htmlFor="e-team">Team *</label>
             <input
@@ -406,8 +453,8 @@ export default function ApplyPage() {
 
       {role && (
         <div className="stack">
-          <button className="btn primary" type="submit">
-            Submit application
+          <button className="btn primary" type="submit" disabled={submitting}>
+            {submitting ? "Submitting…" : "Submit application"}
           </button>
           <Link className="btn secondary" to="/">
             Cancel

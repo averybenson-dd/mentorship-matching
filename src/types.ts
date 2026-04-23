@@ -8,10 +8,11 @@ export type MenteeJobTitle = (typeof MENTEE_JOB_TITLES)[number];
 
 export interface MentorApplication {
   role: "mentor";
+  /** Work email — used for deduping and results lookup */
+  email: string;
   name: string;
   region: string;
   jobTitle: string;
-  managerName: string;
   commitment: MentorCommitment;
   menteeCapacity: 1 | 2 | 3;
   /** 1–12 index into DOORDASH_VALUES */
@@ -23,11 +24,11 @@ export interface MentorApplication {
 
 export interface MenteeApplication {
   role: "mentee";
+  email: string;
   name: string;
   region: string;
   jobTitle: MenteeJobTitle;
   jobTitleOther?: string;
-  managerName: string;
   team: string;
   commitment: MenteeCommitment;
   /** 1–12 indices */
@@ -41,6 +42,7 @@ export type ApplicationPayload = MentorApplication | MenteeApplication;
 
 export interface StoredApplication {
   id: string;
+  email: string;
   createdAt: string;
   updatedAt: string;
   payload: ApplicationPayload;

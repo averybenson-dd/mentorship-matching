@@ -1,48 +1,83 @@
-# DxLx S&O Mentorship (static web app)
+# DxLx S&O Mentorship (GitHub Pages + Supabase)
 
-Single-page app for collecting mentor/mentee applications, running a deterministic matching pass, publishing results, and letting participants look up their pairing.
+Single-page app for mentor/mentee applications, admin matching/publish controls, and participant lookup. **Data lives in Supabase Postgres** (not in GitHub itself) so every browser shares the same responses. GitHub hosts the static frontend; Supabase hosts the database and the small **Edge Function** that gates admin operations and public lookup.
 
 ## Features
 
-- Public **Apply** flow with mentor vs mentee paths (questions mirror your Google Form templates).
-- **Admin** console (password: `admin1999`) to review submissions, **Match**, **Publish** / **Unpublish**, **Rematch**, edit JSON payloads, and export/import backups.
-- **Delete** requires typing `DELETE` and checking an acknowledgment — not a one-click removal.
-- **My match** lookup (only after publish) using the applicant’s name.
-- **Hash-based routing** (`/#/apply`) so hosting on **GitHub Pages** does not require SPA rewrite rules.
+- **Apply** — mentor vs mentee flows; **work email** is the unique key per role (re-submitting upserts the same row). **Manager name fields were removed.**
+- **Admin** — password `admin1999` by default (must match the `ADMIN_PASSWORD` secret in Supabase). List/edit/delete (delete still requires typing `DELETE` + acknowledgment), **Match / Publish / Unpublish / Rematch**, JSON export snapshot.
+- **My match** — after publish, lookup by **email only** (no mentor/mentee toggle). If someone applied as both roles with the same email, you may see two pairing cards.
+- **Rationale** — at least **two paragraphs**, grounded in excerpts from teaching areas, coaching goals, values, team, orders, and notes.
+- **Routing** — `HashRouter` (`/#/apply`) for GitHub Pages.
+
+## 1. Create a Supabase project
+
+1. Go to [supabase.com](https://supabase.com) and create a project.
+2. In the SQL editor, run the migration in `supabase/migrations/20260423000000_init.sql`.
+
+## 2. Deploy the Edge Function
+
+Install the [Supabase CLI](https://supabase.com/docs/guides/cli), then from this repo:
+
+```bash
+supabase login
+supabase link --project-ref <your-project-ref>
+```
+
+Set secrets (use a strong admin password in production; for the stock app use `admin1999` if you want parity with the UI copy):
+
+```bash
+supabase secrets set ADMIN_PASSWORD=admin1999
+```
+
+Deploy:
+
+```bash
+supabase functions deploy mentor-backend --no-verify-jwt
+```
+
+`--no-verify-jwt` is required because the browser calls the function with the **anon** key for public actions (`submitApplication`, `programStatus`, `lookupMatch`).
+
+## 3. Configure GitHub Actions (Pages build)
+
+In your GitHub repo → **Settings → Secrets and variables → Actions**, add:
+
+| Secret | Value |
+|--------|--------|
+| `VITE_SUPABASE_URL` | Project URL, e.g. `https://abcdefgh.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | **anon public** key (Settings → API) |
+
+The workflow passes these into `npm run build` so the static site can call Supabase.
+
+**Important:** Never commit the **service role** key to the repo or to Vite env vars. It is only used inside the Edge Function (Supabase injects `SUPABASE_SERVICE_ROLE_KEY` automatically).
 
 ## Local development
+
+Create `.env.local`:
+
+```
+VITE_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+```
+
+Then:
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Deploy to GitHub Pages
-
-1. Push this folder to a GitHub repository.
-2. In **Settings → Pages → Build and deployment**, choose **GitHub Actions** as the source (not “Deploy from a branch” unless you prefer that flow).
-3. Ensure **Settings → Actions → General → Workflow permissions** allows **Read and write** (needed for Pages artifacts on some orgs).
-4. Push to `main` (or edit `.github/workflows/deploy-pages.yml` to use your default branch). The workflow builds with:
-
-   `VITE_BASE_PATH=/<repository-name>/`
-
-   so asset URLs resolve correctly for project sites (`https://<user>.github.io/<repo>/`).
-
-5. After the workflow succeeds, open the Pages URL and use routes like `https://<user>.github.io/<repo>/#/apply`.
-
-If you host at the root of a custom domain, set `VITE_BASE_PATH=/` when building.
-
-## Data storage (important)
-
-By default, submissions and matches are stored in each visitor’s browser **`localStorage`**. That is fine for demos or a single shared machine, but **applicants will not see each other’s submissions centrally**, and admins only see data for browsers where responses were collected or JSON was imported.
-
-For a real company rollout you will want a small database (for example Supabase or Firebase) plus server-side rules so PII is not world-readable. The export/import tools exist so coordinators can shuttle data until a backend is wired in.
-
 ## Security notes
 
-- The admin password is embedded in client code — anyone can extract it. Treat this as an operational convenience for a trusted internal pilot, not strong security.
-- Do not collect highly sensitive information in the free static version without a proper backend and access controls.
+- The admin password is checked **server-side** in the Edge Function. The in-app default is still a simple password — treat it as a convenience gate, not enterprise IAM.
+- Public endpoints (`submitApplication`, `lookupMatch`) can be abused (spam, enumeration). For a wider rollout add rate limiting (e.g. Cloudflare in front), CAPTCHA, or authenticated submit.
 
 ## Matching logic
 
-Matching runs entirely in the browser (no external model API calls, so nothing is sent to a third party). It tokenizes coaching/teaching text, scores overlap, rewards mentee value goals that include the mentor’s “superpower” value, respects mentor mentee capacity, and skips obvious “No” availability answers. Each pair stores a plain-language **rationale** blurb you can later replace with an LLM by calling OpenAI (or similar) from a **secured server or edge function** — do not ship API keys in this static bundle.
+Matching runs in the **browser on the admin device** after applications are loaded from Supabase. The **rationale** is generated in TypeScript from the actual free-text answers (two paragraphs, with quoted excerpts). There is no third-party LLM call.
+
+## Deploy to GitHub Pages
+
+Enable **GitHub Actions** as the Pages source. Pushes to `main` run `.github/workflows/deploy-pages.yml`, which must receive the Supabase secrets above.
+
+Site URL pattern: `https://<user>.github.io/<repo>/#/apply`

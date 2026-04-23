@@ -303,3 +303,7 @@ tr:last-child td {
   border-color: #b8e2c8;
   color: #1f5f3a;
 }
+
+.preline {
+  white-space: pre-line;
+}
