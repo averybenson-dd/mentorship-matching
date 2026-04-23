@@ -277,39 +277,99 @@ function validateLlmPairs(
 }
 
 type LlmRouting =
+  | "anthropic_direct"
   | "virtual_key"
   | "provider_slug"
   | "openai_via_portkey"
   | "openai_direct";
 
 type LlmGatewayMeta = {
-  gateway: "portkey" | "openai";
+  gateway: "anthropic" | "portkey" | "openai";
   routing: LlmRouting;
   chatUrlHost: string;
 };
 
+function extractAnthropicText(json: Record<string, unknown>): string {
+  const content = json.content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (isRecord(block) && block.type === "text" && typeof block.text === "string") {
+      parts.push(block.text);
+    }
+  }
+  return parts.join("");
+}
+
+/** Claude sometimes wraps JSON in ``` fences even when asked not to. */
+function unwrapLeadingCodeFence(s: string): string {
+  const t = s.trim();
+  if (!t.startsWith("```")) return t;
+  return t.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/u, "").trim();
+}
+
+/**
+ * Portkey Model Catalog slugs must use `@name` on `x-portkey-provider` (see Portkey inference headers).
+ * A bare value like `openai-dasher-logistics` often yields 403; `openai` / `anthropic` stay unchanged.
+ */
+function formatPortkeyProviderHeader(slug: string): string {
+  const s = slug.trim();
+  if (!s) return s;
+  if (s.startsWith("@")) return s;
+  const bare = new Set(["openai", "anthropic", "azure-openai", "google", "groq", "together", "mistral", "cohere"]);
+  if (bare.has(s.toLowerCase())) return s;
+  return `@${s}`;
+}
+
 /** Non-secret snapshot for admin diagnostics (matches routing logic below). */
 function getLlmEnvSummary(): {
-  gateway: "portkey" | "openai" | "none";
+  gateway: "anthropic" | "portkey" | "openai" | "none";
   routing: string;
   openaiModel: string;
+  anthropicModel: string;
+  anthropicKeyPresent: boolean;
   portkeyApiKeyPresent: boolean;
   portkeyVirtualKeyPresent: boolean;
   portkeyProviderPresent: boolean;
+  /** Value sent on `x-portkey-provider` after catalog `@` normalization (empty if unused). */
+  portkeyProviderAsSent: string;
   openaiKeyPresent: boolean;
 } {
   const portkeyApiKeyPresent = Boolean(Deno.env.get("PORTKEY_API_KEY")?.trim());
   const portkeyVirtualKeyPresent = Boolean(Deno.env.get("PORTKEY_VIRTUAL_KEY")?.trim());
-  const portkeyProviderPresent = Boolean(Deno.env.get("PORTKEY_PROVIDER")?.trim());
+  const rawProvider = Deno.env.get("PORTKEY_PROVIDER")?.trim() ?? "";
+  const portkeyProviderPresent = Boolean(rawProvider);
+  const portkeyProviderAsSent = portkeyProviderPresent ? formatPortkeyProviderHeader(rawProvider) : "";
   const openaiKeyPresent = Boolean(Deno.env.get("OPENAI_API_KEY")?.trim());
+  const anthropicKeyPresent = Boolean(Deno.env.get("ANTHROPIC_API_KEY")?.trim());
   const openaiModel = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
+  const anthropicModel =
+    Deno.env.get("ANTHROPIC_MODEL")?.trim() ||
+    Deno.env.get("CLAUDE_MODEL")?.trim() ||
+    "claude-3-5-sonnet-20241022";
+
+  if (anthropicKeyPresent) {
+    return {
+      gateway: "anthropic",
+      routing: "anthropic_direct",
+      openaiModel,
+      anthropicModel,
+      anthropicKeyPresent: true,
+      portkeyApiKeyPresent,
+      portkeyVirtualKeyPresent,
+      portkeyProviderPresent,
+      portkeyProviderAsSent,
+      openaiKeyPresent,
+    };
+  }
+
   let gateway: "portkey" | "openai" | "none" = "none";
   let routing = "missing_llm_credentials";
   if (portkeyApiKeyPresent) {
     gateway = "portkey";
     if (portkeyVirtualKeyPresent) routing = "virtual_key";
-    else if (portkeyProviderPresent) routing = "provider_slug";
     else if (openaiKeyPresent) routing = "openai_via_portkey";
+    else if (portkeyProviderPresent) routing = "provider_slug";
     else routing = "portkey_missing_virtual_key_provider_or_openai";
   } else if (openaiKeyPresent) {
     gateway = "openai";
@@ -319,11 +379,59 @@ function getLlmEnvSummary(): {
     gateway,
     routing,
     openaiModel,
+    anthropicModel,
+    anthropicKeyPresent: false,
     portkeyApiKeyPresent,
     portkeyVirtualKeyPresent,
     portkeyProviderPresent,
+    portkeyProviderAsSent,
     openaiKeyPresent,
   };
+}
+
+type LlmTransport =
+  | {
+    family: "anthropic";
+    url: string;
+    headers: Record<string, string>;
+    meta: LlmGatewayMeta;
+    model: string;
+  }
+  | {
+    family: "openai_chat";
+    url: string;
+    headers: Record<string, string>;
+    meta: LlmGatewayMeta;
+    model: string;
+  };
+
+/** Prefer Anthropic (Claude API) when ANTHROPIC_API_KEY is set; else OpenAI-compatible (direct or Portkey). */
+function resolveLlmTransport(): LlmTransport {
+  const anthropicKey = Deno.env.get("ANTHROPIC_API_KEY")?.trim();
+  if (anthropicKey) {
+    const model =
+      Deno.env.get("ANTHROPIC_MODEL")?.trim() ||
+      Deno.env.get("CLAUDE_MODEL")?.trim() ||
+      "claude-3-5-sonnet-20241022";
+    return {
+      family: "anthropic",
+      url: "https://api.anthropic.com/v1/messages",
+      headers: {
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+      },
+      meta: {
+        gateway: "anthropic",
+        routing: "anthropic_direct",
+        chatUrlHost: "api.anthropic.com",
+      },
+      model,
+    };
+  }
+  const o = resolveChatCompletionsRequest();
+  const model = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
+  return { family: "openai_chat", url: o.url, headers: o.headers, meta: o.meta, model };
 }
 
 /** OpenAI direct, or Portkey gateway (https://docs.portkey.ai/docs/api-reference/headers). */
@@ -346,13 +454,14 @@ function resolveChatCompletionsRequest(): {
     if (virtualKey) {
       headers["x-portkey-virtual-key"] = virtualKey;
       routing = "virtual_key";
-    } else if (providerSlug) {
-      headers["x-portkey-provider"] = providerSlug;
-      routing = "provider_slug";
     } else if (openaiKey) {
+      // Prefer your OpenAI key through Portkey; ignore PORTKEY_PROVIDER when both are set.
       headers["x-portkey-provider"] = "openai";
       headers["Authorization"] = `Bearer ${openaiKey}`;
       routing = "openai_via_portkey";
+    } else if (providerSlug) {
+      headers["x-portkey-provider"] = formatPortkeyProviderHeader(providerSlug);
+      routing = "provider_slug";
     } else {
       throw new Error("missing_portkey_provider");
     }
@@ -373,7 +482,7 @@ function resolveChatCompletionsRequest(): {
   throw new Error("missing_llm_credentials");
 }
 
-async function runAiMatchWithOpenAI(
+async function runAiMatchWithLlm(
   supabase: ReturnType<typeof requireServiceClient>,
 ): Promise<{
   matches: Json[];
@@ -381,8 +490,9 @@ async function runAiMatchWithOpenAI(
   usage: Record<string, unknown>;
   llm: LlmGatewayMeta & { modelRequested: string; modelReported: string | null };
 }> {
-  const { url: llmUrl, headers: llmHeaders, meta: llmMeta } = resolveChatCompletionsRequest();
-  const model = Deno.env.get("OPENAI_MODEL") ?? "gpt-4o-mini";
+  const transport = resolveLlmTransport();
+  const model = transport.model;
+  const llmMeta = transport.meta;
 
   const { data: appsRaw, error: aErr } = await withPostgrestRetry(async () =>
     await supabase.from("applications").select("id,role,payload").order("created_at", { ascending: true })
@@ -445,36 +555,62 @@ async function runAiMatchWithOpenAI(
     JSON.stringify(slimForModel(mentees)),
   ].join("\n");
 
-  const oaRes = await fetch(llmUrl, {
+  const systemForAnthropic =
+    `${system} Output must be a single raw JSON object only (no markdown code fences, no text before or after the JSON).`;
+
+  const oaRes = await fetch(transport.url, {
     method: "POST",
-    headers: llmHeaders,
-    body: JSON.stringify({
-      model,
-      temperature: 0.22,
-      max_tokens: 5000,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
+    headers: transport.headers,
+    body: JSON.stringify(
+      transport.family === "anthropic"
+        ? {
+          model: transport.model,
+          max_tokens: 8192,
+          temperature: 0.22,
+          system: systemForAnthropic,
+          messages: [{ role: "user", content: user }],
+        }
+        : {
+          model: transport.model,
+          temperature: 0.22,
+          max_tokens: 5000,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+        },
+    ),
   });
 
   const oaJson = (await oaRes.json()) as Record<string, unknown>;
   if (!oaRes.ok) {
-    const msg = typeof oaJson.error === "object" && oaJson.error !== null &&
-        typeof (oaJson.error as Record<string, unknown>).message === "string"
-      ? String((oaJson.error as Record<string, unknown>).message)
-      : await oaRes.text();
+    let msg: string;
+    if (transport.family === "anthropic") {
+      const er = oaJson.error;
+      msg = isRecord(er) && typeof er.message === "string"
+        ? String(er.message)
+        : (typeof oaJson.message === "string" ? oaJson.message : JSON.stringify(oaJson));
+    } else {
+      msg = typeof oaJson.error === "object" && oaJson.error !== null &&
+          typeof (oaJson.error as Record<string, unknown>).message === "string"
+        ? String((oaJson.error as Record<string, unknown>).message)
+        : await oaRes.text();
+    }
     throw new Error(`llm_http_${oaRes.status}: ${msg}`);
   }
 
-  const choices = oaJson.choices as unknown[] | undefined;
-  const first = Array.isArray(choices) && choices.length > 0 ? choices[0] : null;
-  const message = first && isRecord(first) && isRecord(first.message)
-    ? first.message
-    : null;
-  const content = message && typeof message.content === "string" ? message.content : "";
+  let content: string;
+  if (transport.family === "anthropic") {
+    content = unwrapLeadingCodeFence(extractAnthropicText(oaJson));
+  } else {
+    const choices = oaJson.choices as unknown[] | undefined;
+    const first = Array.isArray(choices) && choices.length > 0 ? choices[0] : null;
+    const message = first && isRecord(first) && isRecord(first.message)
+      ? first.message
+      : null;
+    content = message && typeof message.content === "string" ? message.content : "";
+  }
   if (!content.trim()) throw new Error("llm_empty_content");
 
   let parsed: unknown;
@@ -634,24 +770,33 @@ Deno.serve(async (req) => {
       if (env.gateway === "none" || (env.gateway === "portkey" && env.routing.startsWith("portkey_missing"))) {
         return jsonResponse({ ok: false, error: env.routing });
       }
-      let req: ReturnType<typeof resolveChatCompletionsRequest>;
+      let transport: LlmTransport;
       try {
-        req = resolveChatCompletionsRequest();
+        transport = resolveLlmTransport();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "missing_llm_credentials";
         return jsonResponse({ ok: false, error: msg });
       }
-      const pingModel = Deno.env.get("OPENAI_MODEL")?.trim() || "gpt-4o-mini";
+      const pingModel = transport.model;
       const t0 = Date.now();
-      const oaRes = await fetch(req.url, {
+      const oaRes = await fetch(transport.url, {
         method: "POST",
-        headers: req.headers,
-        body: JSON.stringify({
-          model: pingModel,
-          max_tokens: 4,
-          temperature: 0,
-          messages: [{ role: "user", content: "Reply with exactly: ok" }],
-        }),
+        headers: transport.headers,
+        body: JSON.stringify(
+          transport.family === "anthropic"
+            ? {
+              model: transport.model,
+              max_tokens: 20,
+              temperature: 0,
+              messages: [{ role: "user", content: "Reply with exactly: ok" }],
+            }
+            : {
+              model: transport.model,
+              max_tokens: 4,
+              temperature: 0,
+              messages: [{ role: "user", content: "Reply with exactly: ok" }],
+            },
+        ),
       });
       const latencyMs = Date.now() - t0;
       let oaJson: Record<string, unknown> = {};
@@ -661,17 +806,21 @@ Deno.serve(async (req) => {
         /* body not json */
       }
       const modelReported = typeof oaJson.model === "string" ? oaJson.model : null;
-      const errMsg = typeof oaJson.error === "object" && oaJson.error !== null &&
-          typeof (oaJson.error as Record<string, unknown>).message === "string"
-        ? String((oaJson.error as Record<string, unknown>).message)
-        : null;
+      const errMsg = transport.family === "anthropic"
+        ? (isRecord(oaJson.error) && typeof (oaJson.error as Record<string, unknown>).message === "string"
+          ? String((oaJson.error as Record<string, unknown>).message)
+          : null)
+        : (typeof oaJson.error === "object" && oaJson.error !== null &&
+            typeof (oaJson.error as Record<string, unknown>).message === "string"
+          ? String((oaJson.error as Record<string, unknown>).message)
+          : null);
       if (!oaRes.ok) {
         return jsonResponse({
           ok: false,
           error: `llm_ping_http_${oaRes.status}`,
           detail: errMsg,
           latencyMs,
-          ...req.meta,
+          ...transport.meta,
           modelRequested: pingModel,
           modelReported,
         });
@@ -679,14 +828,14 @@ Deno.serve(async (req) => {
       return jsonResponse({
         ok: true,
         latencyMs,
-        ...req.meta,
+        ...transport.meta,
         modelRequested: pingModel,
         modelReported,
       });
     }
 
     if (action === "runAiMatch") {
-      const { matches, model, usage, llm } = await runAiMatchWithOpenAI(supabase);
+      const { matches, model, usage, llm } = await runAiMatchWithLlm(supabase);
       return jsonResponse({ ok: true, matches, model, usage, llm });
     }
 

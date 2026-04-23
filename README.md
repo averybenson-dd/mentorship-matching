@@ -34,13 +34,23 @@ supabase secrets set OPENAI_MODEL=gpt-4o-mini
 
 **LLM auth (choose one path):**
 
-1. **Direct OpenAI** (simplest):
+1. **Anthropic Claude (API)** — uses the [Messages API](https://docs.anthropic.com/en/api/messages). This is **billing in Anthropic Console**, not the same as a personal **claude.ai** chat subscription (those do not expose an API key to your app).
+
+   ```bash
+   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+   # optional; default claude-3-5-sonnet-20241022
+   supabase secrets set ANTHROPIC_MODEL=claude-sonnet-4-20250514
+   ```
+
+   If `ANTHROPIC_API_KEY` is set, the Edge Function **ignores** OpenAI/Portkey for matching.
+
+2. **Direct OpenAI**:
 
    ```bash
    supabase secrets set OPENAI_API_KEY=sk-...
    ```
 
-2. **Portkey** (recommended if you want keys/limits/routing in [Portkey](https://portkey.ai)): the Edge Function calls `https://api.portkey.ai/v1/chat/completions` with `x-portkey-api-key`.
+3. **Portkey** (optional; keys/limits/routing in [Portkey](https://portkey.ai)): the Edge Function calls `https://api.portkey.ai/v1/chat/completions` with `x-portkey-api-key`. Only used when **`ANTHROPIC_API_KEY` is not set**.
 
    **Virtual key** (OpenAI credential stays in Portkey’s vault):
 
@@ -56,12 +66,21 @@ supabase secrets set OPENAI_MODEL=gpt-4o-mini
    supabase secrets set OPENAI_API_KEY=sk-...      # Portkey forwards to OpenAI (x-portkey-provider: openai)
    ```
 
-   **Or** Model Catalog slug (no raw OpenAI key in Supabase if Portkey is configured that way):
+   **Or** Model Catalog slug (OpenAI-style chat; credentials live in Portkey, not in Supabase):
 
    ```bash
-   supabase secrets set PORTKEY_API_KEY=...
-   supabase secrets set PORTKEY_PROVIDER=@openai-prod   # example; use your catalog slug
+   supabase secrets set PORTKEY_API_KEY=...   # same workspace key you use in Portkey
+   supabase secrets set PORTKEY_PROVIDER=openai-dasher-logistics   # catalog slug; Edge prefixes `@` on `x-portkey-provider` if missing
+   supabase secrets set OPENAI_MODEL=gpt-4o-mini   # short model id in the JSON body (Portkey docs use this with `@slug` on the provider header)
+
+   **Or** use Portkey’s combined model id as the body `model` (still set `PORTKEY_API_KEY`; you can keep or omit `PORTKEY_PROVIDER` depending on what Portkey expects for your workspace):
+
+   ```bash
+   supabase secrets set OPENAI_MODEL=@openai-dasher-logistics/gpt-4o-mini
    ```
+   ```
+
+   **Routing priority** (no virtual key): if `OPENAI_API_KEY` is set, it wins over **`PORTKEY_PROVIDER`**. If `ANTHROPIC_API_KEY` is set, Anthropic wins over Portkey entirely. For **catalog-only**, remove `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` from Edge secrets so only `PORTKEY_API_KEY` + `PORTKEY_PROVIDER` apply.
 
 Secrets are read **only inside the Edge Function** (never in GitHub Pages). After any change: `supabase functions deploy mentor-backend --no-verify-jwt`.
 

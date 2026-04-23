@@ -37,10 +37,10 @@ function edgeUserMessage(msg: string): string {
 
 function resolveMatchSetupError(msg: string): string {
   if (msg === "missing_llm_credentials") {
-    return "No LLM credentials configured. Set OPENAI_API_KEY for direct OpenAI, OR use Portkey: PORTKEY_API_KEY plus PORTKEY_VIRTUAL_KEY (recommended). Run: supabase secrets set … then supabase functions deploy mentor-backend --no-verify-jwt.";
+    return "No LLM credentials configured. Set ANTHROPIC_API_KEY for Claude (API key from console.anthropic.com), or OPENAI_API_KEY for OpenAI, or Portkey secrets. Run: supabase secrets set … then supabase functions deploy mentor-backend --no-verify-jwt.";
   }
   if (msg === "missing_portkey_provider") {
-    return "PORTKEY_API_KEY is set but Portkey still needs routing: set PORTKEY_VIRTUAL_KEY (OpenAI key stays in Portkey) or PORTKEY_PROVIDER (e.g. @openai-prod) / OPENAI_API_KEY per Portkey docs. Redeploy mentor-backend, then retry.";
+    return "PORTKEY_API_KEY is set but Portkey still needs routing: set OPENAI_API_KEY (used with x-portkey-provider: openai), or PORTKEY_VIRTUAL_KEY, or PORTKEY_PROVIDER alone. Redeploy mentor-backend, then retry.";
   }
   if (msg === "llm_rationale_forbidden_score_language") {
     return "The model tried to describe fit with percentages or boilerplate that conflicts with the numeric score. Click Run AI match again (the prompt now forbids that); if it keeps happening, try a slightly larger model in OPENAI_MODEL.";
@@ -301,10 +301,13 @@ export default function AdminPage() {
         </div>
         <p className="muted" style={{ marginTop: 0 }}>
           <strong>Match / Rematch</strong> calls an LLM from the <code>mentor-backend</code> Edge Function (not
-          your browser). Either set <code>OPENAI_API_KEY</code> for direct OpenAI, or use{" "}
-          <strong>Portkey</strong>: <code>PORTKEY_API_KEY</code> plus <code>PORTKEY_VIRTUAL_KEY</code> (recommended)
-          or <code>PORTKEY_PROVIDER</code> / <code>OPENAI_API_KEY</code> per Portkey docs. Optional{" "}
-          <code>OPENAI_MODEL</code> (default <code>gpt-4o-mini</code>). Redeploy after changing secrets.
+          your browser). If <code>ANTHROPIC_API_KEY</code> is set, matching uses <strong>Claude</strong> (API from
+          console.anthropic.com — not the same as a claude.ai chat subscription). Otherwise use{" "}
+          <code>OPENAI_API_KEY</code> and/or <strong>Portkey</strong> (<code>PORTKEY_API_KEY</code> + virtual key, or
+          pass-through OpenAI key, or <code>PORTKEY_PROVIDER</code> catalog slug — remove{" "}
+          <code>OPENAI_API_KEY</code> from Edge secrets if you want the slug to be used). Optional{" "}
+          <code>ANTHROPIC_MODEL</code> / <code>CLAUDE_MODEL</code> or <code>OPENAI_MODEL</code>. Redeploy after
+          changing secrets.
         </p>
         {loadError && <div className="error">{loadError}</div>}
         {matchError && <div className="error">{matchError}</div>}
@@ -357,9 +360,9 @@ export default function AdminPage() {
         <h2>LLM / Portkey diagnostics</h2>
         <p className="muted">
           Shows how <code>mentor-backend</code> resolves credentials from Supabase secrets (keys are never returned).
-          <strong> Ping gateway</strong> runs one tiny chat completion on the same path as matching. If rationales
-          still feel generic, compare <code>modelReported</code> to <code>OPENAI_MODEL</code> and your Portkey
-          virtual key / config (fallback model, transforms, cache).
+          <strong> Ping gateway</strong> runs one tiny request on the same path as matching (Anthropic Messages API
+          or OpenAI-style chat). If rationales feel generic, compare <code>modelReported</code> to your model env
+          and any Portkey virtual key defaults.
         </p>
         {llmPanelError && <div className="error">{llmPanelError}</div>}
         <div className="stack" style={{ marginTop: "0.75rem" }}>
