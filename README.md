@@ -40,12 +40,14 @@ supabase functions deploy mentor-backend --no-verify-jwt
 
 ## 3. Configure GitHub Actions (Pages build)
 
-In your GitHub repo → **Settings → Secrets and variables → Actions**, add:
+In your GitHub repo → **Settings → Secrets and variables → Actions** → **Repository secrets** (the **Repository** tab, not “Environment secrets” only on `github-pages`), add:
 
 | Secret | Value |
 |--------|--------|
 | `VITE_SUPABASE_URL` | Project URL, e.g. `https://abcdefgh.supabase.co` |
-| `VITE_SUPABASE_ANON_KEY` | **anon public** key (Settings → API) |
+| `VITE_SUPABASE_ANON_KEY` | **anon public** key (Settings → API → Legacy anon / service_role) |
+
+If you only add these under **Environments → github-pages**, the **build** job cannot see them, and the live site will still show “backend missing.” The workflow reads `${{ secrets.* }}` at the **repository** level for `npm run build`.
 
 The workflow passes these into `npm run build` so the static site can call Supabase.
 

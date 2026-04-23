@@ -9,10 +9,12 @@ export default function BackendRequired({ title }: { title: string }) {
         shared database yet.
       </div>
       <p className="lead">
-        Follow <code>README.md</code> to create a Supabase project, run the SQL migration, deploy the{" "}
-        <code>mentor-backend</code> Edge Function, set <code>ADMIN_PASSWORD</code> in Supabase secrets, then
-        add GitHub repository secrets <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code>{" "}
-        and rebuild Pages.
+        Follow <code>README.md</code> for Supabase (SQL migration, <code>mentor-backend</code> Edge Function,{" "}
+        <code>ADMIN_PASSWORD</code> secret). For GitHub Pages, add{" "}
+        <strong>repository</strong> Actions secrets named <code>VITE_SUPABASE_URL</code> and{" "}
+        <code>VITE_SUPABASE_ANON_KEY</code> (under <strong>Settings → Secrets and variables → Actions</strong>, not
+        only under the <code>github-pages</code> environment), then re-run the latest workflow or push an empty
+        commit so the site rebuilds with those values baked in.
       </p>
       <Link className="btn secondary" to="/">
         Home
