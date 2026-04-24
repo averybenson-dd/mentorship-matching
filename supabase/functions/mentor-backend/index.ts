@@ -155,26 +155,62 @@ function rationaleUsesForbiddenScoreLanguage(rationale: string): boolean {
   return banned.some((b) => l.includes(b));
 }
 
+/** Normalize text so model output can still match user essays (quotes, dashes, unicode). */
+function normalizeForAnchoring(s: string): string {
+  return normOneSpace(s)
+    .normalize("NFKC")
+    .replace(/[\u2018\u2019\u201A\u2032]/g, "'")
+    .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
+    .replace(/[\u2013\u2014\u2212]/g, "-")
+    .replace(/\u2026/g, "...");
+}
+
 /**
- * Require verbatim overlap with each side’s application text so rationales cannot be fully generic.
+ * Require overlap with each side’s application text so rationales cannot be fully generic.
+ * Checks are case-insensitive and punctuation-tolerant; we try several substrings, then
+ * consecutive word windows, because models often paraphrase punctuation while keeping words.
  */
 function rationaleAnchoredToBothApplications(
   mp: Record<string, unknown>,
   ep: Record<string, unknown>,
   rationale: string,
 ): boolean {
-  const fieldProves = (field: unknown): boolean => {
-    const f = normOneSpace(field);
+  const r = normalizeForAnchoring(rationale).toLowerCase();
+
+  const charAnchorsProve = (field: unknown): boolean => {
+    const f = normalizeForAnchoring(String(field ?? ""));
     if (!f) return false;
-    if (f.length < 8) return rationale.includes(f);
-    if (f.length <= 28) return rationale.includes(f);
-    const targetLen = 20;
-    const starts = [0, Math.floor(f.length * 0.22), Math.floor(f.length * 0.48)];
-    for (const start of starts) {
-      const frag = f.slice(start, start + targetLen);
-      if (frag.length >= 10 && rationale.includes(frag)) return true;
+    const fl = f.toLowerCase();
+    if (fl.length < 8) return r.includes(fl);
+    if (fl.length <= 28) return r.includes(fl);
+
+    const targetLen = 18;
+    const fracs = [0, 0.1, 0.2, 0.32, 0.44, 0.56, 0.68, 0.8];
+    for (const frac of fracs) {
+      const start = Math.floor(f.length * frac);
+      const frag = f.slice(start, start + targetLen).toLowerCase();
+      if (frag.length >= 10 && r.includes(frag)) return true;
     }
-    return rationale.includes(f.slice(0, 22));
+    const tail = f.slice(Math.max(0, f.length - 22)).toLowerCase();
+    if (tail.length >= 10 && r.includes(tail)) return true;
+    return r.includes(f.slice(0, 22).toLowerCase());
+  };
+
+  /** Five consecutive words from the essay appear in order in the rationale (verbatim words). */
+  const wordWindowProves = (field: unknown): boolean => {
+    const f = normalizeForAnchoring(String(field ?? ""));
+    const words = f.split(/\s+/).filter((w) => w.length > 0);
+    if (words.length < 5) return false;
+    const step = Math.max(1, Math.floor(words.length / 24));
+    for (let i = 0; i + 5 <= words.length; i += step) {
+      const phrase = words.slice(i, i + 5).join(" ").toLowerCase();
+      if (phrase.length >= 18 && r.includes(phrase)) return true;
+    }
+    return false;
+  };
+
+  const fieldProves = (field: unknown): boolean => {
+    return charAnchorsProve(field) || wordWindowProves(field);
   };
 
   return fieldProves(mp.teachingAreas) && fieldProves(ep.coachingAreas);
@@ -518,7 +554,7 @@ async function runAiMatchWithLlm(
     "RATIONALE REQUIREMENTS:",
     "- Write in natural, human prose (not bullet templates).",
     "- Use AT LEAST TWO paragraphs separated by a blank line (two newline characters: \\n\\n).",
-    "- In the FIRST paragraph: synthesize the mentor's teachingAreas (experience at DoorDash and before, current project, where they are strongest at helping others grow) and the mentee's coachingAreas (experience at DoorDash and before, current project, topics they want to grow in, and how they see their career). You MUST copy at least one short phrase verbatim from that mentor's teachingAreas AND one short phrase verbatim from that mentee's coachingAreas (exact substring as written in MENTORS_JSON / MENTEES_JSON).",
+    "- In the FIRST paragraph: synthesize the mentor's teachingAreas (experience at DoorDash and before, current project, where they are strongest at helping others grow) and the mentee's coachingAreas (experience at DoorDash and before, current project, topics they want to grow in, and how they see their career). You MUST include at least one contiguous substring of at least 18 characters from that mentor's teachingAreas AND one of at least 18 characters from that mentee's coachingAreas, copied exactly from MENTORS_JSON / MENTEES_JSON (same letters, spaces, and punctuation). Put each substring inside straight double quotes so it stays exact.",
     "- In the SECOND paragraph: explain why this pairing is likely to work in practice and name 1–2 concrete focus areas for the first 2–3 sessions, grounded in language from teachingAreas and coachingAreas.",
     "- Avoid generic filler (\"synergy\", \"unlock value\", \"best-in-class\", \"leverage\", \"circle back\"). Prefer concrete nouns and verbs taken from their answers.",
     "",
