@@ -114,6 +114,26 @@ export default function ResultsPage() {
       {items && items.length > 0 && (
         <div className="card">
           <h2>Your pairing(s)</h2>
+          {(() => {
+            const mentorMeta = items.find((i) => i.yourRole === "mentor");
+            if (!mentorMeta) return null;
+            const n =
+              mentorMeta.mentorMatchTotal ?? items.filter((i) => i.yourRole === "mentor").length;
+            const cap = mentorMeta.menteeCapacitySignedUp;
+            if (cap != null && cap >= 1 && cap <= 5) {
+              return (
+                <p className="muted" style={{ marginBottom: "1rem" }}>
+                  You signed up to take on up to {cap} mentee{cap === 1 ? "" : "s"}. You have {n}{" "}
+                  published pairing{n === 1 ? "" : "s"} below.
+                </p>
+              );
+            }
+            return (
+              <p className="muted" style={{ marginBottom: "1rem" }}>
+                You have {n} published pairing{n === 1 ? "" : "s"} below.
+              </p>
+            );
+          })()}
           {items.map((it, idx) => (
             <div key={`${it.yourRole}-${idx}`} style={{ marginTop: idx === 0 ? 0 : "1.5rem" }}>
               <p>

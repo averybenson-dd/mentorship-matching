@@ -15,11 +15,5 @@ export const MENTOR_JOB_TITLES = [
   "Senior Director",
 ] as const;
 
-export const MENTOR_MENTEE_CAPACITY = [
-  { value: "1", label: "1 mentee (about 30–60 minutes per month)" },
-  { value: "2", label: "2 mentees — recommended (about 1–2 hours per month)" },
-  { value: "3", label: "3 mentees (about 3 hours per month)" },
-] as const;
-
-export const COMMITMENT_MENTOR = ["yes", "no", "alternative"] as const;
-export const COMMITMENT_MENTEE = ["yes", "no"] as const;
+/** Mentor mentee capacity options (numeric labels only in UI). */
+export const MENTOR_MENTEE_CAPACITY_VALUES = [1, 2, 3, 4, 5] as const;

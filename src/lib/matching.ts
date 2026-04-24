@@ -75,52 +75,37 @@ function buildRationale(
   topicScore: number,
 ): string {
   const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
-  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.team}`);
+  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.jobTitle}`);
   const overlap = [...mTokens].filter((t) => eTokens.has(t)).slice(0, 10);
 
   const teachingExcerpt = excerpt(mentor.teachingAreas, 260);
   const coachingExcerpt = excerpt(mentee.coachingAreas, 260);
 
-  const paragraph1Parts: string[] = [];
-  paragraph1Parts.push(
+  const p1 = [
     `The mentor described teaching comfort in language like: “${teachingExcerpt}”.`,
-  );
-  paragraph1Parts.push(
     `The mentee’s coaching goals read: “${coachingExcerpt}”.`,
-  );
-  if (mentee.team.trim()) {
-    paragraph1Parts.push(
-      `The mentee anchors context to their team (“${excerpt(mentee.team, 120)}”), which can help tailor examples to how work shows up for them.`,
-    );
-  }
-
-  const p1 = paragraph1Parts.join(" ");
+  ].join(" ");
 
   const overlapSentence =
     overlap.length > 0
       ? `Recurring concrete themes in both write-ups include: ${overlap.join(", ")} — that overlap supports a focused first few sessions.`
       : `Where vocabulary differs, early sessions can still align the mentor’s teaching themes to the mentee’s stated coaching priorities.`;
 
-  const cadence =
-    mentor.commitment === "yes" && mentee.commitment === "yes"
-      ? `Both sides indicated they can sustain the program cadence, which reduces scheduling risk.`
-      : `If either side selected a non-standard commitment, the first session should lock a sustainable rhythm.`;
-
   const tone =
     topicScore > 0.12
       ? `The topical overlap between teaching areas and coaching goals is a solid basis for a six-month arc.`
       : `Fit relies more on deliberate agenda-setting in the first two sessions than on automatic keyword overlap.`;
 
-  const p2 = [overlapSentence, cadence, tone].join(" ");
+  const p2 = [overlapSentence, tone].join(" ");
 
   return `${p1}\n\n${p2}`;
 }
 
 function pairScore(mentor: MentorApplication, mentee: MenteeApplication): number {
   const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
-  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.team}`);
+  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.jobTitle}`);
   const topic = jaccard(mTokens, eTokens);
-  return topic * 1.45 + (mentor.commitment === "yes" && mentee.commitment === "yes" ? 0.05 : 0);
+  return topic * 1.45;
 }
 
 function isSeniorManagerPair(mentor: MentorApplication, mentee: MenteeApplication): boolean {
@@ -140,7 +125,8 @@ export function runMatching(applications: StoredApplication[]): MatchPair[] {
   const capacity = new Map<string, number>();
   const used = new Map<string, number>();
   for (const m of mentors) {
-    capacity.set(m.id, m.payload.menteeCapacity);
+    const cap = Number(m.payload.menteeCapacity);
+    capacity.set(m.id, Number.isFinite(cap) && cap >= 1 && cap <= 5 ? cap : 1);
     used.set(m.id, 0);
   }
 
@@ -150,10 +136,9 @@ export function runMatching(applications: StoredApplication[]): MatchPair[] {
     for (const me of mentees) {
       const mentor = mt.payload;
       const mentee = me.payload;
-      if (mentor.commitment === "no" || mentee.commitment === "no") continue;
       if (isSeniorManagerPair(mentor, mentee)) continue;
       const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
-      const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.team}`);
+      const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.jobTitle}`);
       const topicScore = jaccard(mTokens, eTokens);
       const score = pairScore(mentor, mentee);
       const rationale = buildRationale(mentor, mentee, topicScore);

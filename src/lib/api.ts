@@ -61,6 +61,10 @@ export type LookupMatchItem = {
   counterpartRole: string;
   rationale: string;
   score: number;
+  /** Present on mentor lookup rows: capacity from application (1–5). */
+  menteeCapacitySignedUp?: number | null;
+  /** Present on mentor lookup rows: total published matches for this mentor. */
+  mentorMatchTotal?: number | null;
 };
 
 export async function lookupMatchesByEmail(email: string): Promise<{

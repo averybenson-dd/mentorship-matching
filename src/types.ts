@@ -1,11 +1,10 @@
-import type { COMMITMENT_MENTEE, COMMITMENT_MENTOR, MENTEE_JOB_TITLES, MENTOR_JOB_TITLES } from "./constants";
+import type { MENTEE_JOB_TITLES, MENTOR_JOB_TITLES, MENTOR_MENTEE_CAPACITY_VALUES } from "./constants";
 
 export type Role = "mentor" | "mentee";
 
-export type MentorCommitment = (typeof COMMITMENT_MENTOR)[number];
-export type MenteeCommitment = (typeof COMMITMENT_MENTEE)[number];
 export type MenteeJobTitle = (typeof MENTEE_JOB_TITLES)[number];
 export type MentorJobTitle = (typeof MENTOR_JOB_TITLES)[number];
+export type MentorMenteeCapacity = (typeof MENTOR_MENTEE_CAPACITY_VALUES)[number];
 
 export interface MentorApplication {
   role: "mentor";
@@ -13,8 +12,7 @@ export interface MentorApplication {
   email: string;
   name: string;
   jobTitle: MentorJobTitle;
-  commitment: MentorCommitment;
-  menteeCapacity: 1 | 2 | 3;
+  menteeCapacity: MentorMenteeCapacity;
   teachingAreas: string;
 }
 
@@ -23,8 +21,6 @@ export interface MenteeApplication {
   email: string;
   name: string;
   jobTitle: MenteeJobTitle;
-  team: string;
-  commitment: MenteeCommitment;
   coachingAreas: string;
 }
 

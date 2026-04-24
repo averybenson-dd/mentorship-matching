@@ -1,22 +1,20 @@
 import { FormEvent, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  COMMITMENT_MENTEE,
-  COMMITMENT_MENTOR,
   MENTEE_JOB_TITLES,
   MENTOR_JOB_TITLES,
-  MENTOR_MENTEE_CAPACITY,
+  MENTOR_MENTEE_CAPACITY_VALUES,
 } from "../constants";
 import BackendRequired from "../components/BackendRequired";
 import { backendConfigured, submitApplication } from "../lib/api";
 import { isValidEmail } from "../lib/email";
+import { countWords, MIN_ESSAY_WORDS } from "../lib/wordCount";
 import type {
   MentorApplication,
   MenteeApplication,
   MenteeJobTitle,
   MentorJobTitle,
-  MentorCommitment,
-  MenteeCommitment,
+  MentorMenteeCapacity,
   Role,
 } from "../types";
 
@@ -24,7 +22,6 @@ const initialMentor: Omit<MentorApplication, "role"> = {
   email: "",
   name: "",
   jobTitle: "Manager",
-  commitment: "yes",
   menteeCapacity: 2,
   teachingAreas: "",
 };
@@ -33,10 +30,18 @@ const initialMentee: Omit<MenteeApplication, "role"> = {
   email: "",
   name: "",
   jobTitle: "Associate",
-  team: "",
-  commitment: "yes",
   coachingAreas: "",
 };
+
+function friendlySubmitError(msg: string): string {
+  if (msg === "invalid_teaching_word_count" || msg === "invalid_coaching_word_count") {
+    return `Please enter at least ${MIN_ESSAY_WORDS} words in the free-text answer.`;
+  }
+  if (msg === "invalid_capacity") {
+    return "Choose how many mentees you can take on (1–5).";
+  }
+  return msg;
+}
 
 export default function ApplyPage() {
   const [role, setRole] = useState<Role | "">("");
@@ -72,13 +77,20 @@ export default function ApplyPage() {
         setError("Please complete all required mentor fields.");
         return;
       }
+      if (countWords(mentor.teachingAreas) < MIN_ESSAY_WORDS) {
+        setError(`Teaching areas must be at least ${MIN_ESSAY_WORDS} words.`);
+        return;
+      }
       const payload: MentorApplication = { role: "mentor", ...mentor };
       setSubmitting(true);
       try {
         await submitApplication(payload);
         setDone(true);
-      } catch {
-        setError("Could not save your application. Please try again or contact the program team.");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        setError(
+          msg ? friendlySubmitError(msg) : "Could not save your application. Please try again or contact the program team.",
+        );
       } finally {
         setSubmitting(false);
       }
@@ -87,8 +99,12 @@ export default function ApplyPage() {
         setError("Please enter a valid work email.");
         return;
       }
-      if (!mentee.name.trim() || !mentee.team.trim() || !mentee.coachingAreas.trim()) {
+      if (!mentee.name.trim() || !mentee.coachingAreas.trim()) {
         setError("Please complete all required mentee fields.");
+        return;
+      }
+      if (countWords(mentee.coachingAreas) < MIN_ESSAY_WORDS) {
+        setError(`Coaching areas must be at least ${MIN_ESSAY_WORDS} words.`);
         return;
       }
       const payload: MenteeApplication = { role: "mentee", ...mentee };
@@ -96,8 +112,11 @@ export default function ApplyPage() {
       try {
         await submitApplication(payload);
         setDone(true);
-      } catch {
-        setError("Could not save your application. Please try again or contact the program team.");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        setError(
+          msg ? friendlySubmitError(msg) : "Could not save your application. Please try again or contact the program team.",
+        );
       } finally {
         setSubmitting(false);
       }
@@ -199,46 +218,28 @@ export default function ApplyPage() {
             </select>
           </div>
           <div className="field">
-            <label>Are you able to commit to bi-weekly or monthly 30 minute meetings? *</label>
-            <div className="radio-grid">
-              {COMMITMENT_MENTOR.map((c) => (
-                <label key={c} className="radio-line">
-                  <input
-                    type="radio"
-                    name="m-commit"
-                    checked={mentor.commitment === c}
-                    onChange={() => setMentor({ ...mentor, commitment: c as MentorCommitment })}
-                  />
-                  <span>
-                    {c === "yes"
-                      ? "Yes"
-                      : c === "no"
-                        ? "No"
-                        : "Alternative cadence"}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="field">
             <label htmlFor="m-cap">How many mentees can you take on? *</label>
             <select
               id="m-cap"
               value={String(mentor.menteeCapacity)}
               onChange={(e) =>
-                setMentor({ ...mentor, menteeCapacity: Number(e.target.value) as 1 | 2 | 3 })
+                setMentor({
+                  ...mentor,
+                  menteeCapacity: Number(e.target.value) as MentorMenteeCapacity,
+                })
               }
             >
-              {MENTOR_MENTEE_CAPACITY.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
+              {MENTOR_MENTEE_CAPACITY_VALUES.map((n) => (
+                <option key={n} value={String(n)}>
+                  {n}
                 </option>
               ))}
             </select>
           </div>
           <div className="field">
             <label htmlFor="m-teach">
-              What areas of the business / the S&amp;O role are you most comfortable teaching? *
+              What areas of the business / the S&amp;O role are you most comfortable teaching? * (
+              {MIN_ESSAY_WORDS}+ words)
             </label>
             <textarea
               id="m-teach"
@@ -246,6 +247,9 @@ export default function ApplyPage() {
               onChange={(e) => setMentor({ ...mentor, teachingAreas: e.target.value })}
               required
             />
+            <p className="muted" style={{ marginTop: "0.35rem" }}>
+              {countWords(mentor.teachingAreas)} / {MIN_ESSAY_WORDS} words minimum
+            </p>
           </div>
         </>
       )}
@@ -273,7 +277,7 @@ export default function ApplyPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="e-title">Job title (if known) *</label>
+            <label htmlFor="e-title">Job title *</label>
             <select
               id="e-title"
               value={mentee.jobTitle}
@@ -289,38 +293,18 @@ export default function ApplyPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="e-team">Team *</label>
-            <input
-              id="e-team"
-              value={mentee.team}
-              onChange={(e) => setMentee({ ...mentee, team: e.target.value })}
-              required
-            />
-          </div>
-          <div className="field">
-            <label>Are you able to commit to bi-weekly or monthly 30 minute meetings? *</label>
-            <div className="radio-grid">
-              {COMMITMENT_MENTEE.map((c) => (
-                <label key={c} className="radio-line">
-                  <input
-                    type="radio"
-                    name="e-commit"
-                    checked={mentee.commitment === c}
-                    onChange={() => setMentee({ ...mentee, commitment: c as MenteeCommitment })}
-                  />
-                  <span>{c === "yes" ? "Yes" : "No"}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="field">
-            <label htmlFor="e-coach">What areas would you like coaching on? *</label>
+            <label htmlFor="e-coach">
+              What areas would you like coaching on? * ({MIN_ESSAY_WORDS}+ words)
+            </label>
             <textarea
               id="e-coach"
               value={mentee.coachingAreas}
               onChange={(e) => setMentee({ ...mentee, coachingAreas: e.target.value })}
               required
             />
+            <p className="muted" style={{ marginTop: "0.35rem" }}>
+              {countWords(mentee.coachingAreas)} / {MIN_ESSAY_WORDS} words minimum
+            </p>
           </div>
         </>
       )}

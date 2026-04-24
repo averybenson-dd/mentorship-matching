@@ -15,7 +15,7 @@ import {
 } from "../lib/api";
 import type { LlmEnvSummary, LlmPingResult, RunAiMatchMeta } from "../lib/api";
 import { getAdminPassword, isAdminAuthenticated, loginAdmin, logoutAdmin } from "../lib/adminSession";
-import type { ApplicationPayload, ProgramState, StoredApplication } from "../types";
+import type { ApplicationPayload, MentorApplication, ProgramState, StoredApplication } from "../types";
 
 type ModalMode = "none" | "delete" | "edit";
 
@@ -432,6 +432,8 @@ export default function AdminPage() {
                 <th>Role</th>
                 <th>Email</th>
                 <th>Name</th>
+                <th>Mentee cap</th>
+                <th>Matched</th>
                 <th>Highlights</th>
                 <th>Updated</th>
                 <th>Actions</th>
@@ -447,6 +449,16 @@ export default function AdminPage() {
                   </td>
                   <td>{r.email}</td>
                   <td>{r.payload.name}</td>
+                  <td className="muted">
+                    {r.payload.role === "mentor"
+                      ? String((r.payload as MentorApplication).menteeCapacity)
+                      : "—"}
+                  </td>
+                  <td className="muted">
+                    {r.payload.role === "mentor"
+                      ? program.matches.filter((m) => m.mentorId === r.id).length
+                      : "—"}
+                  </td>
                   <td className="muted">{previewPayload(r.payload)}</td>
                   <td className="muted">{new Date(r.updatedAt).toLocaleString()}</td>
                   <td>
@@ -463,7 +475,7 @@ export default function AdminPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted">
+                  <td colSpan={8} className="muted">
                     No applications yet.
                   </td>
                 </tr>
@@ -593,8 +605,7 @@ function previewPayload(p: ApplicationPayload): string {
   if (p.role === "mentor") {
     return `${p.jobTitle} · teaches: ${truncate(p.teachingAreas)}`;
   }
-  const teamBit = p.team.trim() ? ` · team: ${truncate(p.team, 48)}` : "";
-  return `${p.jobTitle} · coaching: ${truncate(p.coachingAreas)}${teamBit}`;
+  return `${p.jobTitle} · coaching: ${truncate(p.coachingAreas)}`;
 }
 
 function truncate(s: string, n = 80) {

@@ -88,6 +88,14 @@ function trunc(s: unknown, max: number): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
+const MIN_ESSAY_WORDS = 100;
+
+function countWords(s: unknown): number {
+  const t = typeof s === "string" ? s.trim() : "";
+  if (!t) return 0;
+  return t.split(/\s+/).filter(Boolean).length;
+}
+
 function validateApplicationPayload(payload: unknown) {
   if (!isRecord(payload)) throw new Error("invalid_payload");
   if (payload.role !== "mentor" && payload.role !== "mentee") throw new Error("invalid_role");
@@ -101,22 +109,23 @@ function validateApplicationPayload(payload: unknown) {
     if (typeof payload.teachingAreas !== "string" || !payload.teachingAreas.trim()) {
       throw new Error("invalid_teaching_areas");
     }
-    const com = payload.commitment;
-    if (com !== "yes" && com !== "no" && com !== "alternative") throw new Error("invalid_commitment");
+    if (countWords(payload.teachingAreas) < MIN_ESSAY_WORDS) {
+      throw new Error("invalid_teaching_word_count");
+    }
     const capRaw = payload.menteeCapacity;
     const cap = typeof capRaw === "number" ? capRaw : Number(capRaw);
-    if (!Number.isFinite(cap) || cap < 1 || cap > 3 || ![1, 2, 3].includes(cap)) {
+    if (!Number.isFinite(cap) || cap < 1 || cap > 5 || ![1, 2, 3, 4, 5].includes(cap)) {
       throw new Error("invalid_capacity");
     }
   } else {
     const jobTitle = typeof payload.jobTitle === "string" ? payload.jobTitle.trim() : "";
     if (!jobTitle || !isAllowedTitle(MENTEE_JOB_TITLES, jobTitle)) throw new Error("invalid_job_title");
-    if (typeof payload.team !== "string" || !payload.team.trim()) throw new Error("invalid_team");
     if (typeof payload.coachingAreas !== "string" || !payload.coachingAreas.trim()) {
       throw new Error("invalid_coaching");
     }
-    const com = payload.commitment;
-    if (com !== "yes" && com !== "no") throw new Error("invalid_commitment");
+    if (countWords(payload.coachingAreas) < MIN_ESSAY_WORDS) {
+      throw new Error("invalid_coaching_word_count");
+    }
   }
 }
 
@@ -181,7 +190,6 @@ function slimForModel(rows: AppRow[]) {
         name: p.name,
         email: p.email,
         jobTitle: p.jobTitle,
-        commitment: p.commitment,
         menteeCapacity: p.menteeCapacity,
         teachingAreas: trunc(p.teachingAreas, 4500),
       };
@@ -192,8 +200,6 @@ function slimForModel(rows: AppRow[]) {
       name: p.name,
       email: p.email,
       jobTitle: p.jobTitle,
-      team: trunc(p.team, 400),
-      commitment: p.commitment,
       coachingAreas: trunc(p.coachingAreas, 4500),
     };
   });
@@ -229,7 +235,6 @@ function validateLlmPairs(
     if (!mRow || !eRow) throw new Error("llm_unknown_id");
     const mp = mRow.payload;
     const ep = eRow.payload;
-    if (mp.commitment === "no" || ep.commitment === "no") throw new Error("llm_invalid_commitment_pair");
 
     const mj = String(mp.jobTitle ?? "").trim();
     const ej = String(ep.jobTitle ?? "").trim();
@@ -238,7 +243,7 @@ function validateLlmPairs(
     }
 
     const cap = Number(mp.menteeCapacity);
-    if (!Number.isFinite(cap) || cap < 1 || cap > 3) throw new Error("llm_bad_capacity");
+    if (!Number.isFinite(cap) || cap < 1 || cap > 5) throw new Error("llm_bad_capacity");
     const prev = mentorCounts.get(mentorId) ?? 0;
     if (prev + 1 > cap) throw new Error("llm_capacity_exceeded");
     mentorCounts.set(mentorId, prev + 1);
@@ -492,16 +497,15 @@ async function runAiMatchWithLlm(
   const system = [
     "You are an expert internal mentorship matcher. You only know what appears in the JSON blobs provided in the user message.",
     "You must output ONLY valid JSON matching the schema described by the user message (no markdown, no commentary).",
-    "Never invent details (teams, metrics, projects, prior roles, or quotes) that are not explicitly present in MENTORS_JSON or MENTEES_JSON.",
+    "Never invent details (metrics, projects, prior roles, or quotes) that are not explicitly present in MENTORS_JSON or MENTEES_JSON.",
   ].join(" ");
 
   const user = [
     "MATCHING RULES (hard constraints):",
     "- Pair each mentee with at most one mentor.",
-    "- A mentor may have multiple mentees ONLY up to their menteeCapacity (1–3). Never exceed capacity.",
-    "- Never pair anyone whose commitment field is \"no\".",
+    "- A mentor may have multiple mentees ONLY up to their menteeCapacity (1–5). Never exceed capacity.",
     "- Never pair a mentor and mentee when BOTH jobTitle fields are exactly the string \"Senior Manager\".",
-    "- Primary fit signal: overlap between the mentor's teachingAreas text and the mentee's coachingAreas text. Use jobTitle only for seniority fit and the Senior Manager rule; use team for light context when helpful.",
+    "- Primary fit signal: overlap between the mentor's teachingAreas text and the mentee's coachingAreas text. Use jobTitle only for seniority fit and the Senior Manager rule.",
     "",
     "SCORE FIELD (must stay consistent with your prose):",
     "- \"score\" is a single float STRICTLY between 0 and 1 (e.g. 0.62), reflecting how strong the substantive fit is given ONLY the JSON fields.",
@@ -734,24 +738,33 @@ Deno.serve(async (req) => {
       for (const row of apps) {
         const rid = row.id as string;
         const role = row.role as string;
-        const pair = matches.find((m) =>
+        const related = matches.filter((m) =>
           role === "mentor" ? m.mentorId === rid : m.menteeId === rid
         );
-        if (!pair) continue;
-        const counterpartId = role === "mentor" ? pair.menteeId : pair.mentorId;
-        const { data: cp } = await withPostgrestRetry(async () =>
-          await supabase.from("applications").select("payload,role").eq("id", counterpartId).maybeSingle()
-        );
+        if (related.length === 0) continue;
         const pSelf = row.payload as Record<string, unknown>;
-        const pCp = (cp?.payload ?? {}) as Record<string, unknown>;
-        items.push({
-          yourRole: role,
-          yourName: String(pSelf.name ?? ""),
-          counterpartName: String(pCp.name ?? ""),
-          counterpartRole: String(cp?.role ?? ""),
-          rationale: pair.rationale,
-          score: pair.score,
-        });
+        const capRaw = role === "mentor" ? pSelf.menteeCapacity : undefined;
+        const capN = typeof capRaw === "number" ? capRaw : Number(capRaw);
+        const menteeCapacitySignedUp =
+          role === "mentor" && Number.isFinite(capN) && capN >= 1 && capN <= 5 ? capN : null;
+
+        for (const pair of related) {
+          const counterpartId = role === "mentor" ? pair.menteeId : pair.mentorId;
+          const { data: cp } = await withPostgrestRetry(async () =>
+            await supabase.from("applications").select("payload,role").eq("id", counterpartId).maybeSingle()
+          );
+          const pCp = (cp?.payload ?? {}) as Record<string, unknown>;
+          items.push({
+            yourRole: role,
+            yourName: String(pSelf.name ?? ""),
+            counterpartName: String(pCp.name ?? ""),
+            counterpartRole: String(cp?.role ?? ""),
+            rationale: pair.rationale,
+            score: pair.score,
+            menteeCapacitySignedUp,
+            mentorMatchTotal: role === "mentor" ? related.length : null,
+          });
+        }
       }
       return jsonResponse({ ok: true, published: true, items });
     }
