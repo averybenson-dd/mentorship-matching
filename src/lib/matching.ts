@@ -1,4 +1,3 @@
-import { DOORDASH_VALUES } from "../constants";
 import type {
   MatchPair,
   MentorApplication,
@@ -63,15 +62,6 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : inter / union;
 }
 
-function valueOverlapScore(
-  mentor: MentorApplication,
-  mentee: MenteeApplication,
-): number {
-  const superIdx = mentor.valueSuperpower;
-  if (!mentee.valuesToDevelop.includes(superIdx)) return 0;
-  return 0.35;
-}
-
 function excerpt(text: string, max = 200): string {
   const t = text.replace(/\s+/g, " ").trim();
   if (!t) return "";
@@ -79,105 +69,62 @@ function excerpt(text: string, max = 200): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
-function listValues(indices: number[]): string {
-  return indices
-    .map((i) => DOORDASH_VALUES[i - 1])
-    .filter(Boolean)
-    .join(", ");
-}
-
 function buildRationale(
   mentor: MentorApplication,
   mentee: MenteeApplication,
   topicScore: number,
-  valueBonus: number,
 ): string {
-  const mentorSuper = DOORDASH_VALUES[mentor.valueSuperpower - 1] ?? "a DoorDash value";
-  const menteeValues = listValues(mentee.valuesToDevelop);
-  const menteeValueShort = mentee.valuesToDevelop
-    .slice(0, 4)
-    .map((i) => DOORDASH_VALUES[i - 1])
-    .filter(Boolean)
-    .join(", ");
-
-  const mTokens = tokenize(
-    `${mentor.teachingAreas} ${mentor.notes ?? ""} ${mentor.favoriteOrder} ${mentor.jobTitle}`,
-  );
-  const eTokens = tokenize(
-    `${mentee.coachingAreas} ${mentee.careerNotes ?? ""} ${mentee.favoriteOrder} ${mentee.team}`,
-  );
+  const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
+  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.team}`);
   const overlap = [...mTokens].filter((t) => eTokens.has(t)).slice(0, 10);
 
   const teachingExcerpt = excerpt(mentor.teachingAreas, 260);
   const coachingExcerpt = excerpt(mentee.coachingAreas, 260);
-  const mentorOrder = excerpt(mentor.favoriteOrder, 120);
-  const menteeOrder = excerpt(mentee.favoriteOrder, 120);
-  const mentorNotes = mentor.notes?.trim() ? excerpt(mentor.notes, 180) : "";
-  const menteeGoals = mentee.careerNotes?.trim() ? excerpt(mentee.careerNotes, 180) : "";
 
   const paragraph1Parts: string[] = [];
   paragraph1Parts.push(
-    `From what you each shared in this cohort’s application, the mentor’s write‑up centers on real S&O delivery experience: they highlighted strengths around “${mentorSuper}” and described teaching comfort in language like: “${teachingExcerpt}”.`,
+    `The mentor described teaching comfort in language like: “${teachingExcerpt}”.`,
   );
   paragraph1Parts.push(
-    `On the mentee side, the development focus is explicit in the coaching goals text: “${coachingExcerpt}”, paired with values they want to grow (${menteeValueShort || menteeValues || "several DoorDash values"}).`,
+    `The mentee’s coaching goals read: “${coachingExcerpt}”.`,
   );
   if (mentee.team.trim()) {
     paragraph1Parts.push(
-      `The mentee also anchors context to their team (“${excerpt(mentee.team, 120)}”), which helps a mentor tailor stories, stakeholder examples, and operating rhythms to how work actually shows up for this person.`,
+      `The mentee anchors context to their team (“${excerpt(mentee.team, 120)}”), which can help tailor examples to how work shows up for them.`,
     );
-  }
-  if (mentorOrder || menteeOrder) {
-    paragraph1Parts.push(
-      `Even the lighter “go‑to order” prompts add texture: the mentor mentioned “${mentorOrder || "their favorite order"}” while the mentee mentioned “${menteeOrder || "their favorite order"}” — small signals of personality and tone that often make mentorship conversations feel more human and less like a performance review.`,
-    );
-  }
-  if (mentorNotes) {
-    paragraph1Parts.push(`The mentor added extra context (“${mentorNotes}”) that can become a useful thread in early sessions.`);
-  }
-  if (menteeGoals) {
-    paragraph1Parts.push(`The mentee’s longer‑form goals note (“${menteeGoals}”) gives a clearer runway for what “success” should feel like by the end of the six‑month arc.`);
   }
 
   const p1 = paragraph1Parts.join(" ");
 
   const overlapSentence =
     overlap.length > 0
-      ? `When we compare the language of both applications, recurring concrete themes show up around: ${overlap.join(", ")} — that overlap is one of the strongest predictors that conversations will move quickly past small talk into specific skills, artifacts, and decision patterns.`
-      : `Even where the vocabulary doesn’t overlap heavily, the pairing still works if the first sessions establish a crisp agenda: the mentor can translate generalized goals into weekly practices (narratives, metrics, stakeholder maps, operating cadences) that match how the mentee described their environment.`;
-
-  const valuesSentence =
-    valueBonus > 0
-      ? `There is a direct values bridge: the mentee is actively trying to develop “${mentorSuper}”, and the mentor named that exact value as a personal superpower — that alignment tends to make feedback feel credible because it is grounded in lived practice, not abstract advice.`
-      : `The mentee’s selected values (${menteeValues || "their selected values"}) don’t perfectly intersect the mentor’s named superpower (“${mentorSuper}”), which is not a dealbreaker: it can still be a strong developmental pairing if sessions deliberately connect mentor habits to the mentee’s chosen growth edges.`;
+      ? `Recurring concrete themes in both write-ups include: ${overlap.join(", ")} — that overlap supports a focused first few sessions.`
+      : `Where vocabulary differs, early sessions can still align the mentor’s teaching themes to the mentee’s stated coaching priorities.`;
 
   const cadence =
     mentor.commitment === "yes" && mentee.commitment === "yes"
-      ? `Both sides indicated they can sustain the program’s cadence (bi‑weekly/monthly), which reduces scheduling risk for a six‑month commitment.`
-      : `Cadence and availability flags matter: if either side selected a non‑standard commitment, the first session should explicitly lock a sustainable rhythm so momentum doesn’t decay mid‑program.`;
+      ? `Both sides indicated they can sustain the program cadence, which reduces scheduling risk.`
+      : `If either side selected a non-standard commitment, the first session should lock a sustainable rhythm.`;
 
-  const confidence = Math.round(Math.min(97, 58 + topicScore * 130 + valueBonus * 110));
+  const tone =
+    topicScore > 0.12
+      ? `The topical overlap between teaching areas and coaching goals is a solid basis for a six-month arc.`
+      : `Fit relies more on deliberate agenda-setting in the first two sessions than on automatic keyword overlap.`;
 
-  const p2 = [
-    overlapSentence,
-    valuesSentence,
-    cadence,
-    `Putting the scoring together, this match is a ${confidence}% programmatic fit based on topical overlap between teaching areas and coaching goals, values alignment, mutual availability signals, and the mentor’s stated mentee capacity — chemistry still matters, so treat the first two sessions as a mutual “calibration sprint” to confirm priorities and boundaries.`,
-  ].join(" ");
+  const p2 = [overlapSentence, cadence, tone].join(" ");
 
   return `${p1}\n\n${p2}`;
 }
 
 function pairScore(mentor: MentorApplication, mentee: MenteeApplication): number {
-  const mTokens = tokenize(
-    `${mentor.teachingAreas} ${mentor.notes ?? ""} ${mentor.favoriteOrder}`,
-  );
-  const eTokens = tokenize(
-    `${mentee.coachingAreas} ${mentee.careerNotes ?? ""} ${mentee.favoriteOrder}`,
-  );
+  const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
+  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.team}`);
   const topic = jaccard(mTokens, eTokens);
-  const valueBonus = valueOverlapScore(mentor, mentee);
-  return topic * 1.4 + valueBonus + (mentor.commitment === "yes" && mentee.commitment === "yes" ? 0.05 : 0);
+  return topic * 1.45 + (mentor.commitment === "yes" && mentee.commitment === "yes" ? 0.05 : 0);
+}
+
+function isSeniorManagerPair(mentor: MentorApplication, mentee: MenteeApplication): boolean {
+  return mentor.jobTitle.trim() === "Senior Manager" && mentee.jobTitle.trim() === "Senior Manager";
 }
 
 export function runMatching(applications: StoredApplication[]): MatchPair[] {
@@ -197,24 +144,19 @@ export function runMatching(applications: StoredApplication[]): MatchPair[] {
     used.set(m.id, 0);
   }
 
-  const pairs: { mentorId: string; menteeId: string; score: number; rationale: string }[] =
-    [];
+  const pairs: { mentorId: string; menteeId: string; score: number; rationale: string }[] = [];
 
   for (const mt of mentors) {
     for (const me of mentees) {
       const mentor = mt.payload;
       const mentee = me.payload;
       if (mentor.commitment === "no" || mentee.commitment === "no") continue;
-      const mTokens = tokenize(
-        `${mentor.teachingAreas} ${mentor.notes ?? ""} ${mentor.favoriteOrder}`,
-      );
-      const eTokens = tokenize(
-        `${mentee.coachingAreas} ${mentee.careerNotes ?? ""} ${mentee.favoriteOrder}`,
-      );
+      if (isSeniorManagerPair(mentor, mentee)) continue;
+      const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
+      const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.team}`);
       const topicScore = jaccard(mTokens, eTokens);
-      const valueBonus = valueOverlapScore(mentor, mentee);
       const score = pairScore(mentor, mentee);
-      const rationale = buildRationale(mentor, mentee, topicScore, valueBonus);
+      const rationale = buildRationale(mentor, mentee, topicScore);
       pairs.push({ mentorId: mt.id, menteeId: me.id, score, rationale });
     }
   }

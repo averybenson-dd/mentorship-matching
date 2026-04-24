@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import {
   COMMITMENT_MENTEE,
   COMMITMENT_MENTOR,
-  DOORDASH_VALUES,
   MENTEE_JOB_TITLES,
+  MENTOR_JOB_TITLES,
   MENTOR_MENTEE_CAPACITY,
 } from "../constants";
 import BackendRequired from "../components/BackendRequired";
@@ -14,6 +14,7 @@ import type {
   MentorApplication,
   MenteeApplication,
   MenteeJobTitle,
+  MentorJobTitle,
   MentorCommitment,
   MenteeCommitment,
   Role,
@@ -22,28 +23,19 @@ import type {
 const initialMentor: Omit<MentorApplication, "role"> = {
   email: "",
   name: "",
-  region: "",
-  jobTitle: "",
+  jobTitle: "Manager",
   commitment: "yes",
   menteeCapacity: 2,
-  valueSuperpower: 1,
   teachingAreas: "",
-  favoriteOrder: "",
-  notes: "",
 };
 
 const initialMentee: Omit<MenteeApplication, "role"> = {
   email: "",
   name: "",
-  region: "",
   jobTitle: "Associate",
-  jobTitleOther: "",
   team: "",
   commitment: "yes",
-  valuesToDevelop: [],
   coachingAreas: "",
-  favoriteOrder: "",
-  careerNotes: "",
 };
 
 export default function ApplyPage() {
@@ -64,16 +56,6 @@ export default function ApplyPage() {
     return <BackendRequired title="Applications unavailable" />;
   }
 
-  function toggleMenteeValue(idx: number) {
-    setMentee((m) => {
-      const has = m.valuesToDevelop.includes(idx);
-      const valuesToDevelop = has
-        ? m.valuesToDevelop.filter((i) => i !== idx)
-        : [...m.valuesToDevelop, idx].sort((a, b) => a - b);
-      return { ...m, valuesToDevelop };
-    });
-  }
-
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -86,11 +68,7 @@ export default function ApplyPage() {
         setError("Please enter a valid work email.");
         return;
       }
-      if (!mentor.name.trim() || !mentor.region.trim() || !mentor.jobTitle.trim()) {
-        setError("Please complete all required mentor fields.");
-        return;
-      }
-      if (!mentor.teachingAreas.trim() || !mentor.favoriteOrder.trim()) {
+      if (!mentor.name.trim() || !mentor.teachingAreas.trim()) {
         setError("Please complete all required mentor fields.");
         return;
       }
@@ -109,20 +87,8 @@ export default function ApplyPage() {
         setError("Please enter a valid work email.");
         return;
       }
-      if (!mentee.name.trim() || !mentee.region.trim() || !mentee.team.trim()) {
+      if (!mentee.name.trim() || !mentee.team.trim() || !mentee.coachingAreas.trim()) {
         setError("Please complete all required mentee fields.");
-        return;
-      }
-      if (mentee.jobTitle === "Other" && !mentee.jobTitleOther?.trim()) {
-        setError("Please specify your job title.");
-        return;
-      }
-      if (mentee.valuesToDevelop.length === 0) {
-        setError("Pick at least one value you want to develop.");
-        return;
-      }
-      if (!mentee.coachingAreas.trim() || !mentee.favoriteOrder.trim()) {
-        setError("Please complete coaching areas and your go-to order.");
         return;
       }
       const payload: MenteeApplication = { role: "mentee", ...mentee };
@@ -172,8 +138,8 @@ export default function ApplyPage() {
       <h1>{title}</h1>
       <p className="lead">
         Senior managers and above with at least six months of tenure are eligible to mentor. The
-        program pairs people based on development goals and mentor strengths. Use the same work
-        email for your application and for results lookup.
+        program pairs people based on coaching goals and what mentors are comfortable teaching. Use
+        the same work email for your application and for results lookup.
       </p>
 
       <div className="field">
@@ -216,22 +182,21 @@ export default function ApplyPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="m-region">Which state or region are you based in? *</label>
-            <input
-              id="m-region"
-              value={mentor.region}
-              onChange={(e) => setMentor({ ...mentor, region: e.target.value })}
-              required
-            />
-          </div>
-          <div className="field">
             <label htmlFor="m-title">Job title *</label>
-            <input
+            <select
               id="m-title"
               value={mentor.jobTitle}
-              onChange={(e) => setMentor({ ...mentor, jobTitle: e.target.value })}
+              onChange={(e) =>
+                setMentor({ ...mentor, jobTitle: e.target.value as MentorJobTitle })
+              }
               required
-            />
+            >
+              {MENTOR_JOB_TITLES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
           </div>
           <div className="field">
             <label>Are you able to commit to bi-weekly or monthly 30 minute meetings? *</label>
@@ -272,22 +237,6 @@ export default function ApplyPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="m-val">Which DoorDash value is your superpower? *</label>
-            <select
-              id="m-val"
-              value={String(mentor.valueSuperpower)}
-              onChange={(e) =>
-                setMentor({ ...mentor, valueSuperpower: Number(e.target.value) as number })
-              }
-            >
-              {DOORDASH_VALUES.map((v, i) => (
-                <option key={v} value={String(i + 1)}>
-                  {i + 1}. {v}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
             <label htmlFor="m-teach">
               What areas of the business / the S&amp;O role are you most comfortable teaching? *
             </label>
@@ -296,23 +245,6 @@ export default function ApplyPage() {
               value={mentor.teachingAreas}
               onChange={(e) => setMentor({ ...mentor, teachingAreas: e.target.value })}
               required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="m-order">Please share your go-to DoorDash order *</label>
-            <textarea
-              id="m-order"
-              value={mentor.favoriteOrder}
-              onChange={(e) => setMentor({ ...mentor, favoriteOrder: e.target.value })}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="m-notes">Anything else we should know?</label>
-            <textarea
-              id="m-notes"
-              value={mentor.notes ?? ""}
-              onChange={(e) => setMentor({ ...mentor, notes: e.target.value })}
             />
           </div>
         </>
@@ -341,15 +273,6 @@ export default function ApplyPage() {
             />
           </div>
           <div className="field">
-            <label htmlFor="e-region">Which state or region are you based in? *</label>
-            <input
-              id="e-region"
-              value={mentee.region}
-              onChange={(e) => setMentee({ ...mentee, region: e.target.value })}
-              required
-            />
-          </div>
-          <div className="field">
             <label htmlFor="e-title">Job title (if known) *</label>
             <select
               id="e-title"
@@ -365,16 +288,6 @@ export default function ApplyPage() {
               ))}
             </select>
           </div>
-          {mentee.jobTitle === "Other" && (
-            <div className="field">
-              <label htmlFor="e-title-other">Please specify *</label>
-              <input
-                id="e-title-other"
-                value={mentee.jobTitleOther ?? ""}
-                onChange={(e) => setMentee({ ...mentee, jobTitleOther: e.target.value })}
-              />
-            </div>
-          )}
           <div className="field">
             <label htmlFor="e-team">Team *</label>
             <input
@@ -401,49 +314,12 @@ export default function ApplyPage() {
             </div>
           </div>
           <div className="field">
-            <label>Which DoorDash values are you looking to further develop? *</label>
-            <div className="checkbox-grid">
-              {DOORDASH_VALUES.map((v, i) => {
-                const idx = i + 1;
-                return (
-                  <label key={v} className="radio-line">
-                    <input
-                      type="checkbox"
-                      checked={mentee.valuesToDevelop.includes(idx)}
-                      onChange={() => toggleMenteeValue(idx)}
-                    />
-                    <span>
-                      {idx}. {v}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-          <div className="field">
             <label htmlFor="e-coach">What areas would you like coaching on? *</label>
             <textarea
               id="e-coach"
               value={mentee.coachingAreas}
               onChange={(e) => setMentee({ ...mentee, coachingAreas: e.target.value })}
               required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="e-order">Please share your go-to DoorDash order *</label>
-            <textarea
-              id="e-order"
-              value={mentee.favoriteOrder}
-              onChange={(e) => setMentee({ ...mentee, favoriteOrder: e.target.value })}
-              required
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="e-career">Anything else about your goals or interest in a mentor?</label>
-            <textarea
-              id="e-career"
-              value={mentee.careerNotes ?? ""}
-              onChange={(e) => setMentee({ ...mentee, careerNotes: e.target.value })}
             />
           </div>
         </>

@@ -1,27 +1,18 @@
 export const ADMIN_PASSWORD = "admin1999";
 
-export const DOORDASH_VALUES: readonly string[] = [
-  "Be an owner",
-  "Bias for action",
-  "Customer obsessed, not competitor-focused",
-  "One team, one fight",
-  "1% better every day",
-  "And, not either/or",
-  "Truth seek",
-  "Think outside the room",
-  "Make room at the table",
-  "Operate at the lowest level of detail",
-  "Dream big, start small",
-  "Choose optimism and have a plan",
-] as const;
-
 export const MENTEE_JOB_TITLES = [
   "Associate",
   "Senior Associate",
   "Associate Manager",
   "Manager",
   "Senior Manager",
-  "Other",
+] as const;
+
+export const MENTOR_JOB_TITLES = [
+  "Senior Manager",
+  "Manager",
+  "Director",
+  "Senior Director",
 ] as const;
 
 export const MENTOR_MENTEE_CAPACITY = [

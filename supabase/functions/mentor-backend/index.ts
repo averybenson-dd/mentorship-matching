@@ -62,20 +62,24 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-const DOORDASH_VALUES = [
-  "Be an owner",
-  "Bias for action",
-  "Customer obsessed, not competitor-focused",
-  "One team, one fight",
-  "1% better every day",
-  "And, not either/or",
-  "Truth seek",
-  "Think outside the room",
-  "Make room at the table",
-  "Operate at the lowest level of detail",
-  "Dream big, start small",
-  "Choose optimism and have a plan",
+const MENTOR_JOB_TITLES = [
+  "Senior Manager",
+  "Manager",
+  "Director",
+  "Senior Director",
 ] as const;
+
+const MENTEE_JOB_TITLES = [
+  "Associate",
+  "Senior Associate",
+  "Associate Manager",
+  "Manager",
+  "Senior Manager",
+] as const;
+
+function isAllowedTitle<T extends readonly string[]>(allowed: T, s: string): boolean {
+  return (allowed as readonly string[]).includes(s);
+}
 
 function trunc(s: unknown, max: number): string {
   const t = typeof s === "string" ? s.replace(/\s+/g, " ").trim() : "";
@@ -91,31 +95,28 @@ function validateApplicationPayload(payload: unknown) {
     throw new Error("invalid_email");
   }
   if (typeof payload.name !== "string" || !payload.name.trim()) throw new Error("invalid_name");
-  if (typeof payload.region !== "string" || !payload.region.trim()) throw new Error("invalid_region");
   if (payload.role === "mentor") {
-    if (typeof payload.jobTitle !== "string" || !payload.jobTitle.trim()) throw new Error("invalid_job_title");
+    const jobTitle = typeof payload.jobTitle === "string" ? payload.jobTitle.trim() : "";
+    if (!jobTitle || !isAllowedTitle(MENTOR_JOB_TITLES, jobTitle)) throw new Error("invalid_job_title");
     if (typeof payload.teachingAreas !== "string" || !payload.teachingAreas.trim()) {
       throw new Error("invalid_teaching_areas");
     }
-    if (typeof payload.favoriteOrder !== "string" || !payload.favoriteOrder.trim()) {
-      throw new Error("invalid_order");
+    const com = payload.commitment;
+    if (com !== "yes" && com !== "no" && com !== "alternative") throw new Error("invalid_commitment");
+    const capRaw = payload.menteeCapacity;
+    const cap = typeof capRaw === "number" ? capRaw : Number(capRaw);
+    if (!Number.isFinite(cap) || cap < 1 || cap > 3 || ![1, 2, 3].includes(cap)) {
+      throw new Error("invalid_capacity");
     }
   } else {
+    const jobTitle = typeof payload.jobTitle === "string" ? payload.jobTitle.trim() : "";
+    if (!jobTitle || !isAllowedTitle(MENTEE_JOB_TITLES, jobTitle)) throw new Error("invalid_job_title");
     if (typeof payload.team !== "string" || !payload.team.trim()) throw new Error("invalid_team");
-    if (!Array.isArray(payload.valuesToDevelop) || payload.valuesToDevelop.length === 0) {
-      throw new Error("invalid_values");
-    }
     if (typeof payload.coachingAreas !== "string" || !payload.coachingAreas.trim()) {
       throw new Error("invalid_coaching");
     }
-    if (typeof payload.favoriteOrder !== "string" || !payload.favoriteOrder.trim()) {
-      throw new Error("invalid_order");
-    }
-    if (payload.jobTitle === "Other") {
-      if (typeof payload.jobTitleOther !== "string" || !payload.jobTitleOther.trim()) {
-        throw new Error("invalid_job_title_other");
-      }
-    }
+    const com = payload.commitment;
+    if (com !== "yes" && com !== "no") throw new Error("invalid_commitment");
   }
 }
 
@@ -124,12 +125,6 @@ type AppRow = {
   role: string;
   payload: Record<string, unknown>;
 };
-
-function valueLabel(idx: unknown): string {
-  const n = typeof idx === "number" ? idx : Number(idx);
-  if (!Number.isFinite(n) || n < 1 || n > DOORDASH_VALUES.length) return "";
-  return DOORDASH_VALUES[n - 1] ?? "";
-}
 
 function normOneSpace(s: unknown): string {
   return String(s ?? "").replace(/\s+/g, " ").trim();
@@ -159,9 +154,6 @@ function rationaleAnchoredToBothApplications(
   ep: Record<string, unknown>,
   rationale: string,
 ): boolean {
-  const mentorFields = [mp.teachingAreas, mp.notes, mp.favoriteOrder, mp.jobTitle, mp.region];
-  const menteeFields = [ep.coachingAreas, ep.careerNotes, ep.favoriteOrder, ep.team, ep.jobTitle, ep.region];
-
   const fieldProves = (field: unknown): boolean => {
     const f = normOneSpace(field);
     if (!f) return false;
@@ -176,47 +168,33 @@ function rationaleAnchoredToBothApplications(
     return rationale.includes(f.slice(0, 22));
   };
 
-  const mentorOk = mentorFields.some(fieldProves);
-  const menteeOk = menteeFields.some(fieldProves);
-  return mentorOk && menteeOk;
+  return fieldProves(mp.teachingAreas) && fieldProves(ep.coachingAreas);
 }
 
 function slimForModel(rows: AppRow[]) {
   return rows.map((r) => {
     const p = r.payload;
     if (r.role === "mentor") {
-      const vi = p.valueSuperpower;
       return {
         id: r.id,
         role: "mentor",
         name: p.name,
         email: p.email,
-        region: p.region,
         jobTitle: p.jobTitle,
         commitment: p.commitment,
         menteeCapacity: p.menteeCapacity,
-        valueSuperpower: valueLabel(vi),
         teachingAreas: trunc(p.teachingAreas, 4500),
-        favoriteOrder: trunc(p.favoriteOrder, 900),
-        notes: trunc(p.notes, 2000),
       };
     }
-    const vals = Array.isArray(p.valuesToDevelop)
-      ? (p.valuesToDevelop as unknown[]).map((i) => valueLabel(i)).filter(Boolean)
-      : [];
     return {
       id: r.id,
       role: "mentee",
       name: p.name,
       email: p.email,
-      region: p.region,
-      jobTitle: p.jobTitle === "Other" ? `Other (${p.jobTitleOther})` : p.jobTitle,
+      jobTitle: p.jobTitle,
       team: trunc(p.team, 400),
       commitment: p.commitment,
-      valuesToDevelop: vals,
       coachingAreas: trunc(p.coachingAreas, 4500),
-      favoriteOrder: trunc(p.favoriteOrder, 900),
-      careerNotes: trunc(p.careerNotes, 2000),
     };
   });
 }
@@ -252,6 +230,12 @@ function validateLlmPairs(
     const mp = mRow.payload;
     const ep = eRow.payload;
     if (mp.commitment === "no" || ep.commitment === "no") throw new Error("llm_invalid_commitment_pair");
+
+    const mj = String(mp.jobTitle ?? "").trim();
+    const ej = String(ep.jobTitle ?? "").trim();
+    if (mj === "Senior Manager" && ej === "Senior Manager") {
+      throw new Error("llm_senior_manager_pair");
+    }
 
     const cap = Number(mp.menteeCapacity);
     if (!Number.isFinite(cap) || cap < 1 || cap > 3) throw new Error("llm_bad_capacity");
@@ -505,23 +489,19 @@ async function runAiMatchWithLlm(
   if (psErr) throw psErr;
   const published = Boolean(ps?.published);
 
-  const numberedValues = DOORDASH_VALUES.map((v, i) => `${i + 1}. ${v}`).join("\n");
-
   const system = [
     "You are an expert internal mentorship matcher. You only know what appears in the JSON blobs provided in the user message.",
     "You must output ONLY valid JSON matching the schema described by the user message (no markdown, no commentary).",
-    "Never invent details (foods, teams, metrics, projects, prior roles, or quotes) that are not explicitly present in MENTORS_JSON or MENTEES_JSON.",
+    "Never invent details (teams, metrics, projects, prior roles, or quotes) that are not explicitly present in MENTORS_JSON or MENTEES_JSON.",
   ].join(" ");
 
   const user = [
-    "DoorDash values list (for context; mentors cite a superpower; mentees cite growth areas):",
-    numberedValues,
-    "",
     "MATCHING RULES (hard constraints):",
-    "- Pair exactly one mentee with at most one mentor per mentee.",
+    "- Pair each mentee with at most one mentor.",
     "- A mentor may have multiple mentees ONLY up to their menteeCapacity (1–3). Never exceed capacity.",
     "- Never pair anyone whose commitment field is \"no\".",
-    "- Prefer strong substantive fit: teachingAreas vs coachingAreas, mentor value superpower vs mentee valuesToDevelop, team context, and career notes.",
+    "- Never pair a mentor and mentee when BOTH jobTitle fields are exactly the string \"Senior Manager\".",
+    "- Primary fit signal: overlap between the mentor's teachingAreas text and the mentee's coachingAreas text. Use jobTitle only for seniority fit and the Senior Manager rule; use team for light context when helpful.",
     "",
     "SCORE FIELD (must stay consistent with your prose):",
     "- \"score\" is a single float STRICTLY between 0 and 1 (e.g. 0.62), reflecting how strong the substantive fit is given ONLY the JSON fields.",
@@ -534,10 +514,9 @@ async function runAiMatchWithLlm(
     "RATIONALE REQUIREMENTS:",
     "- Write in natural, human prose (not bullet templates).",
     "- Use AT LEAST TWO paragraphs separated by a blank line (two newline characters: \\n\\n).",
-    "- In the FIRST paragraph: synthesize what the mentor said they can teach and what the mentee said they want to learn. You MUST copy at least one short phrase verbatim from that mentor's teachingAreas or notes AND one short phrase verbatim from that mentee's coachingAreas or careerNotes (exact substring as written in MENTORS_JSON / MENTEES_JSON).",
-    "- In the SECOND paragraph: explain why this pairing is likely to work in practice (cadence, scope, complementary strengths) and name 1–2 concrete focus areas for the first 2–3 sessions, grounded in their stated interests.",
+    "- In the FIRST paragraph: synthesize what the mentor said they can teach (teachingAreas) and what the mentee said they want coaching on (coachingAreas). You MUST copy at least one short phrase verbatim from that mentor's teachingAreas AND one short phrase verbatim from that mentee's coachingAreas (exact substring as written in MENTORS_JSON / MENTEES_JSON).",
+    "- In the SECOND paragraph: explain why this pairing is likely to work in practice (cadence, scope, complementary strengths) and name 1–2 concrete focus areas for the first 2–3 sessions, grounded in language from teachingAreas and coachingAreas.",
     "- Avoid generic filler (\"synergy\", \"unlock value\", \"best-in-class\", \"leverage\", \"circle back\"). Prefer concrete nouns and verbs taken from their answers.",
-    "- favoriteOrder: only compare or mention orders using the exact favoriteOrder strings from JSON; do not substitute different foods or dishes.",
     "",
     "MENTORS_JSON:",
     JSON.stringify(slimForModel(mentors)),

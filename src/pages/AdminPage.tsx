@@ -1,6 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { DOORDASH_VALUES } from "../constants";
 import BackendRequired from "../components/BackendRequired";
 import {
   backendConfigured,
@@ -44,6 +43,9 @@ function resolveMatchSetupError(msg: string): string {
   }
   if (msg === "llm_rationale_not_grounded_in_applications") {
     return "The model’s rationale did not quote enough verbatim text from both applications. Retry Run AI match; if it repeats, shorten very long free-text answers slightly so the model can mirror real phrases.";
+  }
+  if (msg === "llm_senior_manager_pair") {
+    return "The model proposed a Senior Manager mentor with a Senior Manager mentee, which the program forbids. Run AI match again; if it keeps happening, add more mentors at Director+ level or adjust applications.";
   }
   return edgeUserMessage(msg);
 }
@@ -430,7 +432,6 @@ export default function AdminPage() {
                 <th>Role</th>
                 <th>Email</th>
                 <th>Name</th>
-                <th>Region</th>
                 <th>Highlights</th>
                 <th>Updated</th>
                 <th>Actions</th>
@@ -446,7 +447,6 @@ export default function AdminPage() {
                   </td>
                   <td>{r.email}</td>
                   <td>{r.payload.name}</td>
-                  <td>{r.payload.region}</td>
                   <td className="muted">{previewPayload(r.payload)}</td>
                   <td className="muted">{new Date(r.updatedAt).toLocaleString()}</td>
                   <td>
@@ -463,7 +463,7 @@ export default function AdminPage() {
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={6} className="muted">
                     No applications yet.
                   </td>
                 </tr>
@@ -591,17 +591,10 @@ export default function AdminPage() {
 
 function previewPayload(p: ApplicationPayload): string {
   if (p.role === "mentor") {
-    const v = DOORDASH_VALUES[p.valueSuperpower - 1] ?? "";
-    return `${p.jobTitle} · teaches: ${truncate(p.teachingAreas)} · ${v}`;
+    return `${p.jobTitle} · teaches: ${truncate(p.teachingAreas)}`;
   }
-  const vals = p.valuesToDevelop
-    .slice(0, 3)
-    .map((i) => DOORDASH_VALUES[i - 1])
-    .filter(Boolean)
-    .join(", ");
-  return `${p.jobTitle}${p.jobTitle === "Other" && p.jobTitleOther ? ` (${p.jobTitleOther})` : ""} · ${truncate(
-    p.coachingAreas,
-  )} · values: ${vals}`;
+  const teamBit = p.team.trim() ? ` · team: ${truncate(p.team, 48)}` : "";
+  return `${p.jobTitle} · coaching: ${truncate(p.coachingAreas)}${teamBit}`;
 }
 
 function truncate(s: string, n = 80) {
