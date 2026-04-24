@@ -8,12 +8,8 @@ export const MENTEE_JOB_TITLES = [
   "Senior Manager",
 ] as const;
 
-export const MENTOR_JOB_TITLES = [
-  "Manager",
-  "Senior Manager",
-  "Director",
-  "Senior Director",
-] as const;
+/** Mentor eligibility: Senior Manager and above only. */
+export const MENTOR_JOB_TITLES = ["Senior Manager", "Director", "Senior Director"] as const;
 
 /** Mentor mentee capacity options (numeric labels only in UI). */
 export const MENTOR_MENTEE_CAPACITY_VALUES = [1, 2, 3, 4, 5] as const;

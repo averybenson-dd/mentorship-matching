@@ -21,7 +21,7 @@ import type {
 const initialMentor: Omit<MentorApplication, "role"> = {
   email: "",
   name: "",
-  jobTitle: "Manager",
+  jobTitle: "Senior Manager",
   menteeCapacity: 2,
   teachingAreas: "",
 };

@@ -540,7 +540,7 @@ export default function AdminPage() {
                       ? program.matches.filter((m) => m.mentorId === r.id).length
                       : "—"}
                   </td>
-                  <td className="muted">{previewPayload(r.payload)}</td>
+                  <td className="muted table-cell--highlights preline">{previewPayload(r.payload)}</td>
                   <td className="muted">{new Date(r.updatedAt).toLocaleString()}</td>
                   <td>
                     <div className="row">
@@ -765,12 +765,7 @@ export default function AdminPage() {
 
 function previewPayload(p: ApplicationPayload): string {
   if (p.role === "mentor") {
-    return `${p.jobTitle} · ${truncate(p.teachingAreas)}`;
+    return `${p.jobTitle} · ${(p.teachingAreas ?? "").trim()}`;
   }
-  return `${p.jobTitle} · ${truncate(p.coachingAreas)}`;
-}
-
-function truncate(s: string, n = 80) {
-  const t = s.replace(/\s+/g, " ").trim();
-  return t.length <= n ? t : `${t.slice(0, n)}…`;
+  return `${p.jobTitle} · ${(p.coachingAreas ?? "").trim()}`;
 }

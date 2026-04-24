@@ -62,12 +62,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-const MENTOR_JOB_TITLES = [
-  "Manager",
-  "Senior Manager",
-  "Director",
-  "Senior Director",
-] as const;
+const MENTOR_JOB_TITLES = ["Senior Manager", "Director", "Senior Director"] as const;
 
 const MENTEE_JOB_TITLES = [
   "Associate",
