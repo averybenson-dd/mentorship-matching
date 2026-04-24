@@ -1,6 +1,6 @@
 :root {
   color-scheme: light;
-  /* DoorDash-aligned internal tool palette */
+  /* DoorDash-aligned internal tool palette (brand red #FF3008) */
   --dd-red: #ff3008;
   --dd-red-hover: #e52900;
   --dd-red-soft: rgba(255, 48, 8, 0.1);
@@ -113,25 +113,13 @@ a:hover {
   color: var(--muted);
 }
 
-.dd-logo {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  color: var(--dd-red);
-  flex-shrink: 0;
-}
-
-.dd-logo__mark {
+.dd-logo__img {
   display: block;
+  height: 22px;
+  width: auto;
+  max-width: min(200px, 46vw);
+  object-fit: contain;
   flex-shrink: 0;
-}
-
-.dd-logo__word {
-  font-weight: 800;
-  font-size: 1.0625rem;
-  letter-spacing: -0.035em;
-  line-height: 1;
-  color: var(--dd-red);
 }
 
 .nav {
