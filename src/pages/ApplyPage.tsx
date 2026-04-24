@@ -78,7 +78,7 @@ export default function ApplyPage() {
         return;
       }
       if (countWords(mentor.teachingAreas) < MIN_ESSAY_WORDS) {
-        setError(`Teaching areas must be at least ${MIN_ESSAY_WORDS} words.`);
+        setError(`Your response must be at least ${MIN_ESSAY_WORDS} words.`);
         return;
       }
       const payload: MentorApplication = { role: "mentor", ...mentor };
@@ -104,7 +104,7 @@ export default function ApplyPage() {
         return;
       }
       if (countWords(mentee.coachingAreas) < MIN_ESSAY_WORDS) {
-        setError(`Coaching areas must be at least ${MIN_ESSAY_WORDS} words.`);
+        setError(`Your response must be at least ${MIN_ESSAY_WORDS} words.`);
         return;
       }
       const payload: MenteeApplication = { role: "mentee", ...mentee };
@@ -237,15 +237,18 @@ export default function ApplyPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="m-teach">
-              What areas of the business / the S&amp;O role are you most comfortable teaching? * (
-              {MIN_ESSAY_WORDS}+ words)
-            </label>
+            <label htmlFor="m-teach">Tell us about yourself * ({MIN_ESSAY_WORDS}+ words)</label>
+            <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "0.5rem" }}>
+              In a concise overview, share your professional experience at DoorDash and before, the
+              project or work you are focused on right now, and the areas of the business where you feel
+              most comfortable teaching and helping others grow.
+            </p>
             <textarea
               id="m-teach"
               value={mentor.teachingAreas}
               onChange={(e) => setMentor({ ...mentor, teachingAreas: e.target.value })}
               required
+              rows={10}
             />
             <p className="muted" style={{ marginTop: "0.35rem" }}>
               {countWords(mentor.teachingAreas)} / {MIN_ESSAY_WORDS} words minimum
@@ -293,14 +296,18 @@ export default function ApplyPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="e-coach">
-              What areas would you like coaching on? * ({MIN_ESSAY_WORDS}+ words)
-            </label>
+            <label htmlFor="e-coach">Tell us about yourself * ({MIN_ESSAY_WORDS}+ words)</label>
+            <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "0.5rem" }}>
+              In a concise overview, share your professional experience at DoorDash and before, the
+              project or work you are focused on right now, the parts of the business you want to learn
+              about and grow in, and how you see your career developing over time.
+            </p>
             <textarea
               id="e-coach"
               value={mentee.coachingAreas}
               onChange={(e) => setMentee({ ...mentee, coachingAreas: e.target.value })}
               required
+              rows={10}
             />
             <p className="muted" style={{ marginTop: "0.35rem" }}>
               {countWords(mentee.coachingAreas)} / {MIN_ESSAY_WORDS} words minimum

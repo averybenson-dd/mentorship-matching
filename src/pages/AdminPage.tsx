@@ -15,7 +15,13 @@ import {
 } from "../lib/api";
 import type { LlmEnvSummary, LlmPingResult, RunAiMatchMeta } from "../lib/api";
 import { getAdminPassword, isAdminAuthenticated, loginAdmin, logoutAdmin } from "../lib/adminSession";
-import type { ApplicationPayload, MentorApplication, ProgramState, StoredApplication } from "../types";
+import type {
+  ApplicationPayload,
+  MatchPair,
+  MentorApplication,
+  ProgramState,
+  StoredApplication,
+} from "../types";
 
 type ModalMode = "none" | "delete" | "edit";
 
@@ -73,6 +79,13 @@ export default function AdminPage() {
   const [deleteInput, setDeleteInput] = useState("");
   const [deleteAck, setDeleteAck] = useState(false);
   const [editJson, setEditJson] = useState("");
+
+  const [manualMentorId, setManualMentorId] = useState("");
+  const [manualMenteeId, setManualMenteeId] = useState("");
+  const [manualRationale, setManualRationale] = useState("");
+  const [manualScore, setManualScore] = useState("0.85");
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualBusy, setManualBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     const ap = getAdminPassword();
@@ -247,6 +260,73 @@ export default function AdminPage() {
     return { mentors, mentees, matches: program.matches.length };
   }, [rows, program.matches.length]);
 
+  const mentorRows = useMemo(
+    () => rows.filter((r): r is StoredApplication & { payload: MentorApplication } => r.payload.role === "mentor"),
+    [rows],
+  );
+  const menteeRows = useMemo(() => rows.filter((r) => r.payload.role === "mentee"), [rows]);
+
+  const addManualMatch = async () => {
+    const ap = requirePwd();
+    if (!ap) return;
+    setManualError(null);
+    if (!manualMentorId || !manualMenteeId) {
+      setManualError("Choose both a mentor and a mentee.");
+      return;
+    }
+    if (manualMentorId === manualMenteeId) {
+      setManualError("Mentor and mentee must be different people.");
+      return;
+    }
+    const rationale = manualRationale.trim();
+    if (rationale.length < 40) {
+      setManualError("Write a match rationale of at least a few sentences (40+ characters).");
+      return;
+    }
+    let score = Number.parseFloat(manualScore.replace(",", "."));
+    if (!Number.isFinite(score)) score = 0.85;
+    score = Math.min(1, Math.max(0, score));
+    setManualBusy(true);
+    try {
+      const cur = await getProgramState(ap);
+      const withoutDup = cur.matches.filter(
+        (m) => !(m.mentorId === manualMentorId && m.menteeId === manualMenteeId),
+      );
+      const withoutMentee = withoutDup.filter((m) => m.menteeId !== manualMenteeId);
+      const next: MatchPair[] = [
+        ...withoutMentee,
+        { mentorId: manualMentorId, menteeId: manualMenteeId, score, rationale },
+      ];
+      await setProgramState(ap, { ...cur, matches: next, updatedAt: new Date().toISOString() });
+      setManualRationale("");
+      setManualScore("0.85");
+      await refresh();
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : "Could not save match.");
+    } finally {
+      setManualBusy(false);
+    }
+  };
+
+  const removeMatch = async (m: MatchPair) => {
+    const ap = requirePwd();
+    if (!ap) return;
+    setManualError(null);
+    setManualBusy(true);
+    try {
+      const cur = await getProgramState(ap);
+      const next = cur.matches.filter(
+        (x) => !(x.mentorId === m.mentorId && x.menteeId === m.menteeId),
+      );
+      await setProgramState(ap, { ...cur, matches: next, updatedAt: new Date().toISOString() });
+      await refresh();
+    } catch (e) {
+      setManualError(e instanceof Error ? e.message : "Could not remove match.");
+    } finally {
+      setManualBusy(false);
+    }
+  };
+
   if (!backendConfigured()) {
     return <BackendRequired title="Admin unavailable" />;
   }
@@ -332,9 +412,10 @@ export default function AdminPage() {
           </button>
         </div>
         <p className="muted" style={{ marginBottom: 0 }}>
-          The model proposes pairs that respect mentor capacity and &quot;no&quot; availability flags,
-          and writes multi-paragraph rationales grounded in what each person wrote. If the model output
-          fails validation, fix applications and try again.
+          The model proposes pairs that respect each mentor&apos;s mentee capacity and writes
+          multi-paragraph rationales grounded in their applications. If validation fails, fix
+          applications and try again — or use <strong>Manual matching</strong> below to pair people
+          without capacity limits.
         </p>
         {lastMatchLlm && (
           <p className="muted" style={{ marginTop: "1rem", marginBottom: 0 }}>
@@ -486,9 +567,79 @@ export default function AdminPage() {
       </div>
 
       <div className="card">
+        <h2>Manual matching</h2>
+        <p className="muted">
+          Pair a mentor with a mentee and write your own rationale. This does <strong>not</strong> check
+          mentee capacity — you can exceed what the mentor selected. Adding a mentee who is already matched
+          replaces their previous pairing. Publish when you are ready for them to see results on{" "}
+          <strong>My match</strong>.
+        </p>
+        {manualError && <div className="error">{manualError}</div>}
+        <div className="field">
+          <label htmlFor="manual-mentor">Mentor</label>
+          <select
+            id="manual-mentor"
+            value={manualMentorId}
+            onChange={(e) => setManualMentorId(e.target.value)}
+          >
+            <option value="">Select mentor…</option>
+            {mentorRows.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.payload.name} ({r.email})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="manual-mentee">Mentee</label>
+          <select
+            id="manual-mentee"
+            value={manualMenteeId}
+            onChange={(e) => setManualMenteeId(e.target.value)}
+          >
+            <option value="">Select mentee…</option>
+            {menteeRows.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.payload.name} ({r.email})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="manual-score">Score (0–1, optional)</label>
+          <input
+            id="manual-score"
+            type="text"
+            inputMode="decimal"
+            value={manualScore}
+            onChange={(e) => setManualScore(e.target.value)}
+            placeholder="0.85"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="manual-rationale">Why they are a good match *</label>
+          <textarea
+            id="manual-rationale"
+            value={manualRationale}
+            onChange={(e) => setManualRationale(e.target.value)}
+            rows={6}
+            placeholder="Write the rationale that mentees and mentors will read with their pairing."
+          />
+        </div>
+        <button
+          type="button"
+          className="btn primary"
+          disabled={manualBusy}
+          onClick={() => void addManualMatch()}
+        >
+          {manualBusy ? "Saving…" : "Save manual match"}
+        </button>
+      </div>
+
+      <div className="card">
         <h2>Current matches</h2>
         {program.matches.length === 0 ? (
-          <p className="muted">Run matching to generate pairs.</p>
+          <p className="muted">Run AI matching or add a manual match to create pairs.</p>
         ) : (
           <div className="table-wrap">
             <table>
@@ -498,6 +649,7 @@ export default function AdminPage() {
                   <th>Mentee</th>
                   <th>Score (0–1)</th>
                   <th>Rationale</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -513,6 +665,16 @@ export default function AdminPage() {
                         <span className="muted"> (~{Math.round(m.score * 100)}%)</span>
                       </td>
                       <td className="muted preline">{m.rationale}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn danger"
+                          disabled={manualBusy}
+                          onClick={() => void removeMatch(m)}
+                        >
+                          Unmatch
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -603,9 +765,9 @@ export default function AdminPage() {
 
 function previewPayload(p: ApplicationPayload): string {
   if (p.role === "mentor") {
-    return `${p.jobTitle} · teaches: ${truncate(p.teachingAreas)}`;
+    return `${p.jobTitle} · ${truncate(p.teachingAreas)}`;
   }
-  return `${p.jobTitle} · coaching: ${truncate(p.coachingAreas)}`;
+  return `${p.jobTitle} · ${truncate(p.coachingAreas)}`;
 }
 
 function truncate(s: string, n = 80) {

@@ -63,8 +63,8 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 const MENTOR_JOB_TITLES = [
-  "Senior Manager",
   "Manager",
+  "Senior Manager",
   "Director",
   "Senior Director",
 ] as const;
@@ -505,7 +505,7 @@ async function runAiMatchWithLlm(
     "- Pair each mentee with at most one mentor.",
     "- A mentor may have multiple mentees ONLY up to their menteeCapacity (1–5). Never exceed capacity.",
     "- Never pair a mentor and mentee when BOTH jobTitle fields are exactly the string \"Senior Manager\".",
-    "- Primary fit signal: overlap between the mentor's teachingAreas text and the mentee's coachingAreas text. Use jobTitle only for seniority fit and the Senior Manager rule.",
+    "- Primary fit signal: overlap between the mentor's teachingAreas text (their background, current work, and where they can teach or coach others) and the mentee's coachingAreas text (their background, current work, learning goals, and career direction). Use jobTitle only for seniority fit and the Senior Manager rule.",
     "",
     "SCORE FIELD (must stay consistent with your prose):",
     "- \"score\" is a single float STRICTLY between 0 and 1 (e.g. 0.62), reflecting how strong the substantive fit is given ONLY the JSON fields.",
@@ -518,8 +518,8 @@ async function runAiMatchWithLlm(
     "RATIONALE REQUIREMENTS:",
     "- Write in natural, human prose (not bullet templates).",
     "- Use AT LEAST TWO paragraphs separated by a blank line (two newline characters: \\n\\n).",
-    "- In the FIRST paragraph: synthesize what the mentor said they can teach (teachingAreas) and what the mentee said they want coaching on (coachingAreas). You MUST copy at least one short phrase verbatim from that mentor's teachingAreas AND one short phrase verbatim from that mentee's coachingAreas (exact substring as written in MENTORS_JSON / MENTEES_JSON).",
-    "- In the SECOND paragraph: explain why this pairing is likely to work in practice (cadence, scope, complementary strengths) and name 1–2 concrete focus areas for the first 2–3 sessions, grounded in language from teachingAreas and coachingAreas.",
+    "- In the FIRST paragraph: synthesize the mentor's teachingAreas (experience at DoorDash and before, current project, where they are strongest at helping others grow) and the mentee's coachingAreas (experience at DoorDash and before, current project, topics they want to grow in, and how they see their career). You MUST copy at least one short phrase verbatim from that mentor's teachingAreas AND one short phrase verbatim from that mentee's coachingAreas (exact substring as written in MENTORS_JSON / MENTEES_JSON).",
+    "- In the SECOND paragraph: explain why this pairing is likely to work in practice and name 1–2 concrete focus areas for the first 2–3 sessions, grounded in language from teachingAreas and coachingAreas.",
     "- Avoid generic filler (\"synergy\", \"unlock value\", \"best-in-class\", \"leverage\", \"circle back\"). Prefer concrete nouns and verbs taken from their answers.",
     "",
     "MENTORS_JSON:",

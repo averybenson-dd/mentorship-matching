@@ -9,8 +9,8 @@ export const MENTEE_JOB_TITLES = [
 ] as const;
 
 export const MENTOR_JOB_TITLES = [
-  "Senior Manager",
   "Manager",
+  "Senior Manager",
   "Director",
   "Senior Director",
 ] as const;
