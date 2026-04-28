@@ -1,9 +1,16 @@
 import { FormEvent, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  MENTEE_DEVELOPMENT_GOALS,
   MENTEE_JOB_TITLES,
+  MENTEE_MENTOR_LEVEL_PREFERENCE,
+  MENTEE_PREFERRED_MENTORSHIP_STYLES,
+  MENTOR_BEST_SUITED_MENTEE,
+  MENTOR_FOCUS_AREAS,
   MENTOR_JOB_TITLES,
   MENTOR_MENTEE_CAPACITY_VALUES,
+  MENTOR_MENTORSHIP_STYLES,
+  MAX_MULTI_PICKS,
 } from "../constants";
 import BackendRequired from "../components/BackendRequired";
 import { backendConfigured, submitApplication } from "../lib/api";
@@ -13,16 +20,27 @@ import type {
   MentorApplication,
   MenteeApplication,
   MenteeJobTitle,
+  MentorFocusArea,
   MentorJobTitle,
+  MenteeDevGoal,
   MentorMenteeCapacity,
   Role,
 } from "../types";
 
+function toggleList<T extends string>(list: T[], item: T, max: number): T[] {
+  if (list.includes(item)) return list.filter((x) => x !== item) as T[];
+  if (list.length >= max) return list;
+  return [...list, item] as T[];
+}
+
 const initialMentor: Omit<MentorApplication, "role"> = {
   email: "",
   name: "",
-  jobTitle: "Senior Manager",
+  jobTitle: "Manager",
   menteeCapacity: 2,
+  mentorFocusAreas: [],
+  mentorshipStyle: MENTOR_MENTORSHIP_STYLES[0]!,
+  bestSuitedMentee: MENTOR_BEST_SUITED_MENTEE[0]!,
   teachingAreas: "",
 };
 
@@ -30,6 +48,9 @@ const initialMentee: Omit<MenteeApplication, "role"> = {
   email: "",
   name: "",
   jobTitle: "Associate",
+  developmentGoals: [],
+  preferredMentorshipStyle: MENTEE_PREFERRED_MENTORSHIP_STYLES[0]!,
+  mentorLevelLookingFor: MENTEE_MENTOR_LEVEL_PREFERENCE[0]!,
   coachingAreas: "",
 };
 
@@ -39,6 +60,18 @@ function friendlySubmitError(msg: string): string {
   }
   if (msg === "invalid_capacity") {
     return "Choose how many mentees you can take on (1–5).";
+  }
+  if (msg === "invalid_mentor_focus") {
+    return `Select 1–${MAX_MULTI_PICKS} primary areas you can mentor in.`;
+  }
+  if (msg === "invalid_mentor_style" || msg === "invalid_mentor_mentee_type") {
+    return "Please complete the mentor dropdowns.";
+  }
+  if (msg === "invalid_mentee_goals") {
+    return `Select 1–${MAX_MULTI_PICKS} development goals.`;
+  }
+  if (msg === "invalid_mentee_style" || msg === "invalid_mentee_mentor_level") {
+    return "Please complete the mentee dropdowns.";
   }
   return msg;
 }
@@ -77,6 +110,10 @@ export default function ApplyPage() {
         setError("Please complete all required mentor fields.");
         return;
       }
+      if (mentor.mentorFocusAreas.length < 1 || mentor.mentorFocusAreas.length > MAX_MULTI_PICKS) {
+        setError(`Select 1–${MAX_MULTI_PICKS} primary areas you can mentor in.`);
+        return;
+      }
       if (countWords(mentor.teachingAreas) < MIN_ESSAY_WORDS) {
         setError(`Your response must be at least ${MIN_ESSAY_WORDS} words.`);
         return;
@@ -101,6 +138,10 @@ export default function ApplyPage() {
       }
       if (!mentee.name.trim() || !mentee.coachingAreas.trim()) {
         setError("Please complete all required mentee fields.");
+        return;
+      }
+      if (mentee.developmentGoals.length < 1 || mentee.developmentGoals.length > MAX_MULTI_PICKS) {
+        setError(`Select 1–${MAX_MULTI_PICKS} development goals.`);
         return;
       }
       if (countWords(mentee.coachingAreas) < MIN_ESSAY_WORDS) {
@@ -156,9 +197,9 @@ export default function ApplyPage() {
     <form className="card" onSubmit={onSubmit}>
       <h1>{title}</h1>
       <p className="lead">
-        Senior managers and above with at least six months of tenure are eligible to mentor. The
-        program pairs people based on coaching goals and what mentors are comfortable teaching. Use
-        the same work email for your application and for results lookup.
+        Eligible mentors are people leaders and experienced ICs (Manager and above) with sufficient
+        tenure. The program matches mentees with mentors who are at least one level more senior.
+        Use the same work email for your application and for results lookup.
       </p>
 
       <div className="field">
@@ -213,6 +254,71 @@ export default function ApplyPage() {
               {MENTOR_JOB_TITLES.map((t) => (
                 <option key={t} value={t}>
                   {t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>Primary areas you can mentor in * (select up to {MAX_MULTI_PICKS})</label>
+            <div className="checkbox-grid">
+              {MENTOR_FOCUS_AREAS.map((area) => (
+                <label key={area} className="radio-line">
+                  <input
+                    type="checkbox"
+                    checked={mentor.mentorFocusAreas.includes(area)}
+                    onChange={() =>
+                      setMentor({
+                        ...mentor,
+                        mentorFocusAreas: toggleList(
+                          mentor.mentorFocusAreas,
+                          area as MentorFocusArea,
+                          MAX_MULTI_PICKS,
+                        ),
+                      })
+                    }
+                  />
+                  <span>{area}</span>
+                </label>
+              ))}
+            </div>
+            <p className="muted" style={{ marginTop: "0.35rem" }}>
+              Selected: {mentor.mentorFocusAreas.length} / {MAX_MULTI_PICKS}
+            </p>
+          </div>
+          <div className="field">
+            <label htmlFor="m-style">Mentorship style *</label>
+            <select
+              id="m-style"
+              value={mentor.mentorshipStyle}
+              onChange={(e) =>
+                setMentor({
+                  ...mentor,
+                  mentorshipStyle: e.target.value as MentorApplication["mentorshipStyle"],
+                })
+              }
+            >
+              {MENTOR_MENTORSHIP_STYLES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="m-best">What type of mentee are you best suited for? *</label>
+            <select
+              id="m-best"
+              value={mentor.bestSuitedMentee}
+              onChange={(e) =>
+                setMentor({
+                  ...mentor,
+                  bestSuitedMentee: e.target.value as MentorApplication["bestSuitedMentee"],
+                })
+              }
+            >
+              {MENTOR_BEST_SUITED_MENTEE.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>
@@ -291,6 +397,73 @@ export default function ApplyPage() {
               {MENTEE_JOB_TITLES.map((t) => (
                 <option key={t} value={t}>
                   {t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>What are your top development goals? * (select up to {MAX_MULTI_PICKS})</label>
+            <div className="checkbox-grid">
+              {MENTEE_DEVELOPMENT_GOALS.map((g) => (
+                <label key={g} className="radio-line">
+                  <input
+                    type="checkbox"
+                    checked={mentee.developmentGoals.includes(g)}
+                    onChange={() =>
+                      setMentee({
+                        ...mentee,
+                        developmentGoals: toggleList(
+                          mentee.developmentGoals,
+                          g as MenteeDevGoal,
+                          MAX_MULTI_PICKS,
+                        ),
+                      })
+                    }
+                  />
+                  <span>{g}</span>
+                </label>
+              ))}
+            </div>
+            <p className="muted" style={{ marginTop: "0.35rem" }}>
+              Selected: {mentee.developmentGoals.length} / {MAX_MULTI_PICKS}
+            </p>
+          </div>
+          <div className="field">
+            <label htmlFor="e-pref-style">Preferred mentorship style *</label>
+            <select
+              id="e-pref-style"
+              value={mentee.preferredMentorshipStyle}
+              onChange={(e) =>
+                setMentee({
+                  ...mentee,
+                  preferredMentorshipStyle:
+                    e.target.value as MenteeApplication["preferredMentorshipStyle"],
+                })
+              }
+            >
+              {MENTEE_PREFERRED_MENTORSHIP_STYLES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="e-level">What level of mentor are you looking for? *</label>
+            <select
+              id="e-level"
+              value={mentee.mentorLevelLookingFor}
+              onChange={(e) =>
+                setMentee({
+                  ...mentee,
+                  mentorLevelLookingFor:
+                    e.target.value as MenteeApplication["mentorLevelLookingFor"],
+                })
+              }
+            >
+              {MENTEE_MENTOR_LEVEL_PREFERENCE.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
             </select>

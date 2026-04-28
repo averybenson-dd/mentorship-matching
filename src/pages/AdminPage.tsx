@@ -15,6 +15,7 @@ import {
 } from "../lib/api";
 import type { LlmEnvSummary, LlmPingResult, RunAiMatchMeta } from "../lib/api";
 import { getAdminPassword, isAdminAuthenticated, loginAdmin, logoutAdmin } from "../lib/adminSession";
+import { MAX_MULTI_PICKS } from "../constants";
 import type {
   ApplicationPayload,
   MatchPair,
@@ -50,8 +51,8 @@ function resolveMatchSetupError(msg: string): string {
   if (msg === "llm_rationale_not_grounded_in_applications") {
     return "The model’s rationale did not quote enough verbatim text from both applications. Retry Run AI match; if it repeats, shorten very long free-text answers slightly so the model can mirror real phrases.";
   }
-  if (msg === "llm_senior_manager_pair") {
-    return "The model proposed a Senior Manager mentor with a Senior Manager mentee, which the program forbids. Run AI match again; if it keeps happening, add more mentors at Director+ level or adjust applications.";
+  if (msg === "llm_invalid_seniority" || msg === "llm_senior_manager_pair") {
+    return "The model proposed a pair where the mentor is not at least one level more senior than the mentee (same title, or mentor more junior). Run AI match again; if it keeps happening, add mentors with higher titles or adjust mentee applications.";
   }
   return edgeUserMessage(msg);
 }
@@ -765,7 +766,26 @@ export default function AdminPage() {
 
 function previewPayload(p: ApplicationPayload): string {
   if (p.role === "mentor") {
-    return `${p.jobTitle} · ${(p.teachingAreas ?? "").trim()}`;
+    const focus = (p.mentorFocusAreas?.length ? p.mentorFocusAreas : []).join("; ");
+    return [
+      `Job title: ${p.jobTitle}`,
+      `Mentee capacity: ${p.menteeCapacity}`,
+      `Primary areas (up to ${MAX_MULTI_PICKS}): ${focus || "—"}`,
+      `Mentorship style: ${p.mentorshipStyle ?? "—"}`,
+      `Best suited for: ${p.bestSuitedMentee ?? "—"}`,
+      "",
+      "Essay:",
+      (p.teachingAreas ?? "").trim(),
+    ].join("\n");
   }
-  return `${p.jobTitle} · ${(p.coachingAreas ?? "").trim()}`;
+  const goals = (p.developmentGoals?.length ? p.developmentGoals : []).join("; ");
+  return [
+    `Job title: ${p.jobTitle}`,
+    `Development goals (up to ${MAX_MULTI_PICKS}): ${goals || "—"}`,
+    `Preferred mentorship style: ${p.preferredMentorshipStyle ?? "—"}`,
+    `Mentor level looking for: ${p.mentorLevelLookingFor ?? "—"}`,
+    "",
+    "Essay:",
+    (p.coachingAreas ?? "").trim(),
+  ].join("\n");
 }

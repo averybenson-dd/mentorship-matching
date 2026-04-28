@@ -4,6 +4,7 @@ import type {
   MenteeApplication,
   StoredApplication,
 } from "../types";
+import { mentorOutranksMentee } from "./jobTitleRank";
 
 const STOP = new Set([
   "the",
@@ -69,13 +70,41 @@ function excerpt(text: string, max = 200): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
+function mentorBlob(m: MentorApplication): string {
+  return [
+    m.teachingAreas,
+    m.jobTitle,
+    ...m.mentorFocusAreas,
+    m.mentorshipStyle,
+    m.bestSuitedMentee,
+  ].join(" ");
+}
+
+function menteeBlob(me: MenteeApplication): string {
+  return [
+    me.coachingAreas,
+    me.jobTitle,
+    ...me.developmentGoals,
+    me.preferredMentorshipStyle,
+    me.mentorLevelLookingFor,
+  ].join(" ");
+}
+
+/** Token overlap between dropdown labels (different wording, shared themes). */
+function structuredGoalOverlap(m: MentorApplication, me: MenteeApplication): number {
+  const fa = tokenize(m.mentorFocusAreas.join(" "));
+  const dg = tokenize(me.developmentGoals.join(" "));
+  return jaccard(fa, dg);
+}
+
 function buildRationale(
   mentor: MentorApplication,
   mentee: MenteeApplication,
   topicScore: number,
+  structScore: number,
 ): string {
-  const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
-  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.jobTitle}`);
+  const mTokens = tokenize(mentorBlob(mentor));
+  const eTokens = tokenize(menteeBlob(mentee));
   const overlap = [...mTokens].filter((t) => eTokens.has(t)).slice(0, 10);
 
   const teachingExcerpt = excerpt(mentor.teachingAreas, 260);
@@ -91,25 +120,27 @@ function buildRationale(
       ? `Recurring concrete themes in both write-ups include: ${overlap.join(", ")} — that overlap supports a focused first few sessions.`
       : `Where vocabulary differs, early sessions can still align the mentor’s teaching themes to the mentee’s stated coaching priorities.`;
 
+  const structNote =
+    structScore > 0.2
+      ? `Their selected focus areas and development goals line up in ways that give you a clear thread for the first meetings.`
+      : `Use the first session to align the mentor’s stated style (“${excerpt(mentor.mentorshipStyle, 80)}”) with how the mentee prefers to work (“${excerpt(mentee.preferredMentorshipStyle, 80)}”).`;
+
   const tone =
-    topicScore > 0.12
-      ? `The topical overlap between teaching areas and coaching goals is a solid basis for a six-month arc.`
+    topicScore > 0.12 || structScore > 0.25
+      ? `The overlap between narratives and structured choices is a decent basis for a six-month arc.`
       : `Fit relies more on deliberate agenda-setting in the first two sessions than on automatic keyword overlap.`;
 
-  const p2 = [overlapSentence, tone].join(" ");
+  const p2 = [overlapSentence, structNote, tone].join(" ");
 
   return `${p1}\n\n${p2}`;
 }
 
 function pairScore(mentor: MentorApplication, mentee: MenteeApplication): number {
-  const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
-  const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.jobTitle}`);
+  const mTokens = tokenize(mentorBlob(mentor));
+  const eTokens = tokenize(menteeBlob(mentee));
   const topic = jaccard(mTokens, eTokens);
-  return topic * 1.45;
-}
-
-function isSeniorManagerPair(mentor: MentorApplication, mentee: MenteeApplication): boolean {
-  return mentor.jobTitle.trim() === "Senior Manager" && mentee.jobTitle.trim() === "Senior Manager";
+  const struct = structuredGoalOverlap(mentor, mentee);
+  return topic * 1.25 + struct * 0.35;
 }
 
 export function runMatching(applications: StoredApplication[]): MatchPair[] {
@@ -136,12 +167,13 @@ export function runMatching(applications: StoredApplication[]): MatchPair[] {
     for (const me of mentees) {
       const mentor = mt.payload;
       const mentee = me.payload;
-      if (isSeniorManagerPair(mentor, mentee)) continue;
-      const mTokens = tokenize(`${mentor.teachingAreas} ${mentor.jobTitle}`);
-      const eTokens = tokenize(`${mentee.coachingAreas} ${mentee.jobTitle}`);
+      if (!mentorOutranksMentee(mentor.jobTitle, mentee.jobTitle)) continue;
+      const mTokens = tokenize(mentorBlob(mentor));
+      const eTokens = tokenize(menteeBlob(mentee));
       const topicScore = jaccard(mTokens, eTokens);
+      const structScore = structuredGoalOverlap(mentor, mentee);
       const score = pairScore(mentor, mentee);
-      const rationale = buildRationale(mentor, mentee, topicScore);
+      const rationale = buildRationale(mentor, mentee, topicScore, structScore);
       pairs.push({ mentorId: mt.id, menteeId: me.id, score, rationale });
     }
   }

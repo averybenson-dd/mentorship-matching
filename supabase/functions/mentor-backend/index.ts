@@ -62,7 +62,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-const MENTOR_JOB_TITLES = ["Senior Manager", "Director", "Senior Director"] as const;
+const MENTOR_JOB_TITLES = ["Manager", "Senior Manager", "Director", "Senior Director"] as const;
 
 const MENTEE_JOB_TITLES = [
   "Associate",
@@ -72,8 +72,130 @@ const MENTEE_JOB_TITLES = [
   "Senior Manager",
 ] as const;
 
+const JOB_TITLE_RANK: Record<string, number> = {
+  Associate: 1,
+  "Senior Associate": 2,
+  "Associate Manager": 3,
+  Manager: 4,
+  "Senior Manager": 5,
+  Director: 6,
+  "Senior Director": 7,
+};
+
+/** Mentor must sit strictly higher than mentee on this ladder (≥1 rank gap). */
+function mentorOutranksMentee(mentorJobTitle: string, menteeJobTitle: string): boolean {
+  const m = JOB_TITLE_RANK[mentorJobTitle.trim()] ?? -1;
+  const e = JOB_TITLE_RANK[menteeJobTitle.trim()] ?? -1;
+  if (m < 1 || e < 1) return false;
+  return m > e;
+}
+
+const MAX_MULTI_PICKS = 3;
+
+const MENTOR_FOCUS_AREAS = [
+  "People Management",
+  "Career Growth & Promotions",
+  "Cross-functional Collaboration",
+  "Strategic Thinking",
+  "Operations / Execution",
+  "Product / Tech",
+  "Data & Analytics",
+  "Communication & Influence",
+] as const;
+
+const MENTOR_MENTORSHIP_STYLES = [
+  "Hands-on / Tactical (resume reviews, problem solving)",
+  "Strategic / Big-picture guidance",
+  "Coaching through questions (Socratic style)",
+  "Sponsorship & advocacy",
+  "Flexible / depends on mentee needs",
+] as const;
+
+const MENTOR_BEST_SUITED_MENTEE = [
+  "Early career (0–2 years)",
+  "Mid-level (3–6 years)",
+  "Senior ICs",
+  "New managers",
+  "Aspiring managers",
+] as const;
+
+const MENTEE_DEVELOPMENT_GOALS = [
+  "Getting promoted",
+  "Becoming a manager",
+  "Improving performance in current role",
+  "Building strategic thinking skills",
+  "Navigating cross-functional work",
+  "Improving communication / influence",
+  "Exploring new career paths",
+] as const;
+
+const MENTEE_PREFERRED_MENTORSHIP_STYLES = [
+  "Direct advice & feedback",
+  "Structured guidance (goals, plans)",
+  "Open-ended coaching conversations",
+  "Accountability check-ins",
+  "Flexible",
+] as const;
+
+const MENTEE_MENTOR_LEVEL_PREFERENCE = [
+  "1 level above me",
+  "2+ levels above me",
+  "Different function / perspective",
+  "No preference",
+] as const;
+
 function isAllowedTitle<T extends readonly string[]>(allowed: T, s: string): boolean {
   return (allowed as readonly string[]).includes(s);
+}
+
+function parseUniqueStrings(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of v) {
+    if (typeof x !== "string") continue;
+    const s = x.trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+  return out;
+}
+
+function validateMentorStructured(payload: Record<string, unknown>) {
+  const fa = parseUniqueStrings(payload.mentorFocusAreas);
+  if (fa.length < 1 || fa.length > MAX_MULTI_PICKS) throw new Error("invalid_mentor_focus");
+  const allowedFa = MENTOR_FOCUS_AREAS as readonly string[];
+  for (const x of fa) {
+    if (!allowedFa.includes(x)) throw new Error("invalid_mentor_focus");
+  }
+  const style = typeof payload.mentorshipStyle === "string" ? payload.mentorshipStyle.trim() : "";
+  if (!(MENTOR_MENTORSHIP_STYLES as readonly string[]).includes(style)) {
+    throw new Error("invalid_mentor_style");
+  }
+  const suited = typeof payload.bestSuitedMentee === "string" ? payload.bestSuitedMentee.trim() : "";
+  if (!(MENTOR_BEST_SUITED_MENTEE as readonly string[]).includes(suited)) {
+    throw new Error("invalid_mentor_mentee_type");
+  }
+}
+
+function validateMenteeStructured(payload: Record<string, unknown>) {
+  const goals = parseUniqueStrings(payload.developmentGoals);
+  if (goals.length < 1 || goals.length > MAX_MULTI_PICKS) throw new Error("invalid_mentee_goals");
+  const allowedG = MENTEE_DEVELOPMENT_GOALS as readonly string[];
+  for (const x of goals) {
+    if (!allowedG.includes(x)) throw new Error("invalid_mentee_goals");
+  }
+  const pref =
+    typeof payload.preferredMentorshipStyle === "string" ? payload.preferredMentorshipStyle.trim() : "";
+  if (!(MENTEE_PREFERRED_MENTORSHIP_STYLES as readonly string[]).includes(pref)) {
+    throw new Error("invalid_mentee_style");
+  }
+  const lvl =
+    typeof payload.mentorLevelLookingFor === "string" ? payload.mentorLevelLookingFor.trim() : "";
+  if (!(MENTEE_MENTOR_LEVEL_PREFERENCE as readonly string[]).includes(lvl)) {
+    throw new Error("invalid_mentee_mentor_level");
+  }
 }
 
 function trunc(s: unknown, max: number): string {
@@ -83,7 +205,7 @@ function trunc(s: unknown, max: number): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
-const MIN_ESSAY_WORDS = 100;
+const MIN_ESSAY_WORDS = 50;
 
 function countWords(s: unknown): number {
   const t = typeof s === "string" ? s.trim() : "";
@@ -112,6 +234,7 @@ function validateApplicationPayload(payload: unknown) {
     if (!Number.isFinite(cap) || cap < 1 || cap > 5 || ![1, 2, 3, 4, 5].includes(cap)) {
       throw new Error("invalid_capacity");
     }
+    validateMentorStructured(payload);
   } else {
     const jobTitle = typeof payload.jobTitle === "string" ? payload.jobTitle.trim() : "";
     if (!jobTitle || !isAllowedTitle(MENTEE_JOB_TITLES, jobTitle)) throw new Error("invalid_job_title");
@@ -121,6 +244,7 @@ function validateApplicationPayload(payload: unknown) {
     if (countWords(payload.coachingAreas) < MIN_ESSAY_WORDS) {
       throw new Error("invalid_coaching_word_count");
     }
+    validateMenteeStructured(payload);
   }
 }
 
@@ -158,6 +282,27 @@ function normalizeForAnchoring(s: string): string {
     .replace(/[\u201C\u201D\u201E\u2033]/g, '"')
     .replace(/[\u2013\u2014\u2212]/g, "-")
     .replace(/\u2026/g, "...");
+}
+
+/** Essays + dropdown answers merged so rationales can anchor on structured selections too. */
+function mentorAnchorBlob(mp: Record<string, unknown>): string {
+  const fa = Array.isArray(mp.mentorFocusAreas)
+    ? mp.mentorFocusAreas.filter((x): x is string => typeof x === "string").join("; ")
+    : "";
+  return [mp.teachingAreas, fa, mp.mentorshipStyle, mp.bestSuitedMentee, mp.jobTitle]
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function menteeAnchorBlob(ep: Record<string, unknown>): string {
+  const dg = Array.isArray(ep.developmentGoals)
+    ? ep.developmentGoals.filter((x): x is string => typeof x === "string").join("; ")
+    : "";
+  return [ep.coachingAreas, dg, ep.preferredMentorshipStyle, ep.mentorLevelLookingFor, ep.jobTitle]
+    .map((x) => String(x ?? "").trim())
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 /**
@@ -208,7 +353,7 @@ function rationaleAnchoredToBothApplications(
     return charAnchorsProve(field) || wordWindowProves(field);
   };
 
-  return fieldProves(mp.teachingAreas) && fieldProves(ep.coachingAreas);
+  return fieldProves(mentorAnchorBlob(mp)) && fieldProves(menteeAnchorBlob(ep));
 }
 
 function slimForModel(rows: AppRow[]) {
@@ -222,6 +367,9 @@ function slimForModel(rows: AppRow[]) {
         email: p.email,
         jobTitle: p.jobTitle,
         menteeCapacity: p.menteeCapacity,
+        mentorFocusAreas: Array.isArray(p.mentorFocusAreas) ? p.mentorFocusAreas : [],
+        mentorshipStyle: p.mentorshipStyle,
+        bestSuitedMentee: p.bestSuitedMentee,
         teachingAreas: trunc(p.teachingAreas, 4500),
       };
     }
@@ -231,6 +379,9 @@ function slimForModel(rows: AppRow[]) {
       name: p.name,
       email: p.email,
       jobTitle: p.jobTitle,
+      developmentGoals: Array.isArray(p.developmentGoals) ? p.developmentGoals : [],
+      preferredMentorshipStyle: p.preferredMentorshipStyle,
+      mentorLevelLookingFor: p.mentorLevelLookingFor,
       coachingAreas: trunc(p.coachingAreas, 4500),
     };
   });
@@ -269,8 +420,8 @@ function validateLlmPairs(
 
     const mj = String(mp.jobTitle ?? "").trim();
     const ej = String(ep.jobTitle ?? "").trim();
-    if (mj === "Senior Manager" && ej === "Senior Manager") {
-      throw new Error("llm_senior_manager_pair");
+    if (!mentorOutranksMentee(mj, ej)) {
+      throw new Error("llm_invalid_seniority");
     }
 
     const cap = Number(mp.menteeCapacity);
@@ -535,8 +686,8 @@ async function runAiMatchWithLlm(
     "MATCHING RULES (hard constraints):",
     "- Pair each mentee with at most one mentor.",
     "- A mentor may have multiple mentees ONLY up to their menteeCapacity (1–5). Never exceed capacity.",
-    "- Never pair a mentor and mentee when BOTH jobTitle fields are exactly the string \"Senior Manager\".",
-    "- Primary fit signal: overlap between the mentor's teachingAreas text (their background, current work, and where they can teach or coach others) and the mentee's coachingAreas text (their background, current work, learning goals, and career direction). Use jobTitle only for seniority fit and the Senior Manager rule.",
+    "- Seniority: the mentor's jobTitle MUST be strictly more senior than the mentee's jobTitle on this ladder (low→high): Associate, Senior Associate, Associate Manager, Manager, Senior Manager, Director, Senior Director. Same title or mentor more junior than mentee is forbidden.",
+    "- Primary fit signals: (1) overlap between mentorFocusAreas and developmentGoals (same or closely related themes); (2) alignment between mentorshipStyle and preferredMentorshipStyle; (3) whether bestSuitedMentee matches the mentee's likely career stage implied by jobTitle + goals; (4) mentorLevelLookingFor vs actual title gap (e.g. \"2+ levels above\" needs a mentor several rungs up when possible); (5) teachingAreas vs coachingAreas narrative overlap. Use jobTitle for the seniority rule first.",
     "",
     "SCORE FIELD (must stay consistent with your prose):",
     "- \"score\" is a single float STRICTLY between 0 and 1 (e.g. 0.62), reflecting how strong the substantive fit is given ONLY the JSON fields.",
@@ -549,8 +700,8 @@ async function runAiMatchWithLlm(
     "RATIONALE REQUIREMENTS:",
     "- Write in natural, human prose (not bullet templates).",
     "- Use AT LEAST TWO paragraphs separated by a blank line (two newline characters: \\n\\n).",
-    "- In the FIRST paragraph: synthesize the mentor's teachingAreas (experience at DoorDash and before, current project, where they are strongest at helping others grow) and the mentee's coachingAreas (experience at DoorDash and before, current project, topics they want to grow in, and how they see their career). You MUST include at least one contiguous substring of at least 18 characters from that mentor's teachingAreas AND one of at least 18 characters from that mentee's coachingAreas, copied exactly from MENTORS_JSON / MENTEES_JSON (same letters, spaces, and punctuation). Put each substring inside straight double quotes so it stays exact.",
-    "- In the SECOND paragraph: explain why this pairing is likely to work in practice and name 1–2 concrete focus areas for the first 2–3 sessions, grounded in language from teachingAreas and coachingAreas.",
+    "- In the FIRST paragraph: synthesize the mentor (teachingAreas, mentorFocusAreas, mentorshipStyle, bestSuitedMentee) and the mentee (coachingAreas, developmentGoals, preferredMentorshipStyle, mentorLevelLookingFor). You MUST include at least one contiguous substring of at least 18 characters copied exactly from that mentor's teachingAreas OR from a selected mentorFocusAreas string, AND one of at least 18 characters from the mentee's coachingAreas OR from a selected developmentGoals string — all from MENTORS_JSON / MENTEES_JSON (same letters, spaces, punctuation). Put each substring inside straight double quotes so it stays exact.",
+    "- In the SECOND paragraph: explain why this pairing is likely to work in practice; reference at least one structured choice (focus area, goal, or style) and name 1–2 concrete focus areas for the first 2–3 sessions.",
     "- Avoid generic filler (\"synergy\", \"unlock value\", \"best-in-class\", \"leverage\", \"circle back\"). Prefer concrete nouns and verbs taken from their answers.",
     "",
     "MENTORS_JSON:",

@@ -5,4 +5,4 @@ export function countWords(s: string): number {
   return t.split(/\s+/).filter(Boolean).length;
 }
 
-export const MIN_ESSAY_WORDS = 100;
+export const MIN_ESSAY_WORDS = 50;
