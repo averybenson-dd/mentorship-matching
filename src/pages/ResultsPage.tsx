@@ -76,7 +76,7 @@ export default function ResultsPage() {
   return (
     <div>
       <div className="card">
-        <h1>My match</h1>
+        <h1>View My Match</h1>
         <p className="lead">
           After administrators publish pairings, look up your match using the same work email you
           used when you applied.

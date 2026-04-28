@@ -507,8 +507,8 @@ export default function AdminPage() {
 
       <div className="card">
         <h2>Applications</h2>
-        <div className="table-wrap">
-          <table>
+        <div className="table-wrap table-wrap--applications">
+          <table className="applications-table">
             <thead>
               <tr>
                 <th>Role</th>
@@ -543,7 +543,7 @@ export default function AdminPage() {
                   </td>
                   <td className="muted table-cell--highlights preline">{previewPayload(r.payload)}</td>
                   <td className="muted">{new Date(r.updatedAt).toLocaleString()}</td>
-                  <td>
+                  <td className="table-cell--actions">
                     <div className="row">
                       <button type="button" className="btn secondary" onClick={() => openEdit(r)}>
                         Edit
@@ -573,7 +573,7 @@ export default function AdminPage() {
           Pair a mentor with a mentee and write your own rationale. This does <strong>not</strong> check
           mentee capacity — you can exceed what the mentor selected. Adding a mentee who is already matched
           replaces their previous pairing. Publish when you are ready for them to see results on{" "}
-          <strong>My match</strong>.
+          <strong>View My Match</strong>.
         </p>
         {manualError && <div className="error">{manualError}</div>}
         <div className="field">

@@ -33,7 +33,7 @@ function Layout({ children }: { children: React.ReactNode }) {
                 className={loc.pathname === "/results" ? "nav-link is-active" : "nav-link"}
                 to="/results"
               >
-                My match
+                View My Match
               </Link>
               <Link className={loc.pathname === "/admin" ? "nav-link is-active" : "nav-link"} to="/admin">
                 Admin

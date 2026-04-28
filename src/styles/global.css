@@ -352,12 +352,67 @@ select:focus {
   border-radius: 8px;
 }
 
-/* Admin applications: show full essay text (scroll/wrap instead of clipping). */
+/* Applications list: keep table within viewport width (no horizontal panning). */
+.table-wrap--applications {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+.applications-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.applications-table th,
+.applications-table td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.applications-table th:nth-child(1),
+.applications-table td:nth-child(1) {
+  width: 5.5rem;
+}
+
+.applications-table th:nth-child(2),
+.applications-table td:nth-child(2) {
+  width: 18%;
+}
+
+.applications-table th:nth-child(3),
+.applications-table td:nth-child(3) {
+  width: 12%;
+}
+
+.applications-table th:nth-child(4),
+.applications-table td:nth-child(4) {
+  width: 5rem;
+}
+
+.applications-table th:nth-child(5),
+.applications-table td:nth-child(5) {
+  width: 4.5rem;
+}
+
+.applications-table th:nth-child(7),
+.applications-table td:nth-child(7) {
+  width: 7.5rem;
+}
+
+.applications-table th:nth-child(8),
+.applications-table td:nth-child(8) {
+  width: 8.5rem;
+}
+
+.applications-table .table-cell--actions .row {
+  gap: 0.35rem;
+}
+
+/* Admin applications: full essay + structured answers wrap inside the row. */
 .table-cell--highlights {
   white-space: pre-wrap;
   word-break: break-word;
-  min-width: min(28rem, 85vw);
-  max-width: 40rem;
+  overflow-wrap: anywhere;
   vertical-align: top;
 }
 
