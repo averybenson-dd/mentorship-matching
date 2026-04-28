@@ -5,7 +5,6 @@ Single-page app for mentor/mentee applications, admin matching/publish controls,
 ## Features
 
 - **Apply** — mentor vs mentee flows; **work email** is the unique key per role (re-submitting upserts the same row). **Manager name fields were removed.**
-- **Admin** — password `admin1999` by default (must match the `ADMIN_PASSWORD` secret in Supabase). List/edit/delete (delete still requires typing `DELETE` + acknowledgment), **Match / Publish / Unpublish / Rematch**, JSON export snapshot.
 - **My match** — after publish, lookup by **email only** (no mentor/mentee toggle). If someone applied as both roles with the same email, you may see two pairing cards.
 - **Rationale** — at least **two paragraphs**, grounded in excerpts from teaching areas, coaching goals, values, team, orders, and notes.
 - **Routing** — `HashRouter` (`/#/apply`) for GitHub Pages.
@@ -24,11 +23,6 @@ supabase login
 supabase link --project-ref <your-project-ref>
 ```
 
-Set secrets (use a strong admin password in production; for the stock app use `admin1999` if you want parity with the UI copy):
-
-```bash
-supabase secrets set ADMIN_PASSWORD=admin1999
-```
 
 **LLM auth (priority: Gemini → Anthropic → OpenAI)**
 
