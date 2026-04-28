@@ -162,30 +162,20 @@ function pick(rng, arr) {
   return arr[Math.floor(rng() * arr.length)];
 }
 
-/** 55+ words — above backend minimum of 50 */
-function mentorEssay(rng, name, title, org) {
-  const themes = pickN(rng, MENTOR_FOCUS_AREAS, 2).join(" and ");
+/** 10–50 words (matches production essay limits). */
+function mentorEssay(name, title, org) {
   return (
-    `My name is ${name} and I currently serve as ${title} supporting ${org} at DoorDash. ` +
-    `Before DoorDash I worked in consulting and a high growth startup, which taught me how to translate ambiguous goals into operating cadences and stakeholder alignment. ` +
-    `Today I spend most of my time partnering with cross functional leaders on roadmap prioritization, org design conversations, and performance calibration. ` +
-    `I enjoy mentoring because it forces me to be crisp about what actually moved the needle in my own career, especially around ${themes}. ` +
-    `I am comfortable coaching on executive communication, managing up, and building credibility in matrixed teams. ` +
-    `Outside of work I stay curious about urban logistics trends and volunteer with local food access programs, which keeps me grounded in the mission. ` +
-    `For this program I hope to help someone build a credible promotion narrative while staying authentic to their strengths.`
+    `I am ${name}, ${title} on ${org} at DoorDash. ` +
+    `I focus on roadmap alignment, stakeholder trust, and execution at scale. ` +
+    `I mentor on communication, prioritization, and cross-team delivery with patience and candor.`
   );
 }
 
-function menteeEssay(rng, name, title, org) {
-  const goals = pickN(rng, MENTEE_DEVELOPMENT_GOALS, 2).join(" and ");
+function menteeEssay(name, title, org) {
   return (
-    `Hi, I am ${name}, a ${title} on the ${org} team at DoorDash. ` +
-    `I joined about two years ago after graduate school and have rotated through a few high intensity initiatives involving experimentation, forecasting, and exec readouts. ` +
-    `I am proud of how quickly I have learned the business but I still feel gaps in ${goals}. ` +
-    `I want a mentor who can challenge my thinking, help me sequence my next twelve months, and give direct feedback on how I show up in forums. ` +
-    `I learn best when we set a clear topic for each conversation and follow up with small experiments between sessions. ` +
-    `Long term I want to grow toward broader ownership, whether that is people leadership or a principal style IC path, and I want to be intentional rather than reactive. ` +
-    `I am excited to learn from someone who has navigated similar tradeoffs at DoorDash scale.`
+    `Hi, I am ${name}, a ${title} in ${org} at DoorDash. ` +
+    `I want clearer promotion goals, stronger exec presence, and practical feedback each session. ` +
+    `I learn best with short agendas and small experiments between meetings.`
   );
 }
 
@@ -242,7 +232,7 @@ for (let i = 0; i < COUNT; i++) {
         mentorFocusAreas: pickN(r, MENTOR_FOCUS_AREAS, 1 + Math.floor(r() * 3)),
         mentorshipStyle: pick(r, MENTOR_MENTORSHIP_STYLES),
         bestSuitedMentee: pick(r, MENTOR_BEST_SUITED_MENTEE),
-        teachingAreas: mentorEssay(r, name, jobTitle, org),
+        teachingAreas: mentorEssay(name, jobTitle, org),
       };
       await submit(url, anonKey, payload);
       console.log(`OK mentor  ${idx}/${COUNT} ${email}`);
@@ -256,7 +246,7 @@ for (let i = 0; i < COUNT; i++) {
         developmentGoals: pickN(r, MENTEE_DEVELOPMENT_GOALS, 1 + Math.floor(r() * 3)),
         preferredMentorshipStyle: pick(r, MENTEE_PREFERRED_MENTORSHIP_STYLES),
         mentorLevelLookingFor: pick(r, MENTEE_MENTOR_LEVEL_PREFERENCE),
-        coachingAreas: menteeEssay(r, name, jobTitle, org),
+        coachingAreas: menteeEssay(name, jobTitle, org),
       };
       await submit(url, anonKey, payload);
       console.log(`OK mentee ${idx}/${COUNT} ${email}`);

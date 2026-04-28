@@ -54,6 +54,22 @@ export async function fetchProgramPublished(): Promise<boolean> {
   return Boolean(out.published);
 }
 
+/** Mentee’s application answers (mentor-only lookup). */
+export type MenteeApplicationSnapshot = {
+  name: string;
+  jobTitle: string;
+  developmentGoals: string[];
+  preferredMentorshipStyle: string;
+  mentorLevelLookingFor: string;
+  coachingAreas: string;
+};
+
+/** Minimal mentor info shown to mentees (no mentor essay or dropdowns). */
+export type MentorPublicCard = {
+  name: string;
+  jobTitle: string;
+};
+
 export type LookupMatchItem = {
   yourRole: string;
   yourName: string;
@@ -65,6 +81,10 @@ export type LookupMatchItem = {
   menteeCapacitySignedUp?: number | null;
   /** Present on mentor lookup rows: total published matches for this mentor. */
   mentorMatchTotal?: number | null;
+  /** Mentor lookups: full mentee form answers for this pairing. */
+  menteeApplication?: MenteeApplicationSnapshot | null;
+  /** Mentee lookups: mentor name + title only. */
+  mentorPublicCard?: MentorPublicCard | null;
 };
 
 export async function lookupMatchesByEmail(email: string): Promise<{

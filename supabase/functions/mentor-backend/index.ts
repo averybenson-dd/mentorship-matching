@@ -205,12 +205,18 @@ function trunc(s: unknown, max: number): string {
   return `${t.slice(0, max - 1)}…`;
 }
 
-const MIN_ESSAY_WORDS = 50;
+const MIN_ESSAY_WORDS = 10;
+const MAX_ESSAY_WORDS = 50;
 
 function countWords(s: unknown): number {
   const t = typeof s === "string" ? s.trim() : "";
   if (!t) return 0;
   return t.split(/\s+/).filter(Boolean).length;
+}
+
+function essayWordCountOk(s: unknown): boolean {
+  const n = countWords(s);
+  return n >= MIN_ESSAY_WORDS && n <= MAX_ESSAY_WORDS;
 }
 
 function validateApplicationPayload(payload: unknown) {
@@ -226,7 +232,7 @@ function validateApplicationPayload(payload: unknown) {
     if (typeof payload.teachingAreas !== "string" || !payload.teachingAreas.trim()) {
       throw new Error("invalid_teaching_areas");
     }
-    if (countWords(payload.teachingAreas) < MIN_ESSAY_WORDS) {
+    if (!essayWordCountOk(payload.teachingAreas)) {
       throw new Error("invalid_teaching_word_count");
     }
     const capRaw = payload.menteeCapacity;
@@ -241,7 +247,7 @@ function validateApplicationPayload(payload: unknown) {
     if (typeof payload.coachingAreas !== "string" || !payload.coachingAreas.trim()) {
       throw new Error("invalid_coaching");
     }
-    if (countWords(payload.coachingAreas) < MIN_ESSAY_WORDS) {
+    if (!essayWordCountOk(payload.coachingAreas)) {
       throw new Error("invalid_coaching_word_count");
     }
     validateMenteeStructured(payload);
@@ -253,6 +259,21 @@ type AppRow = {
   role: string;
   payload: Record<string, unknown>;
 };
+
+/** Safe mentee fields for mentor-only lookup (no mentee email). */
+function menteeApplicationSnapshot(p: Record<string, unknown>): Record<string, unknown> {
+  const goals = Array.isArray(p.developmentGoals)
+    ? p.developmentGoals.filter((x): x is string => typeof x === "string")
+    : [];
+  return {
+    name: String(p.name ?? ""),
+    jobTitle: String(p.jobTitle ?? ""),
+    developmentGoals: goals,
+    preferredMentorshipStyle: String(p.preferredMentorshipStyle ?? ""),
+    mentorLevelLookingFor: String(p.mentorLevelLookingFor ?? ""),
+    coachingAreas: String(p.coachingAreas ?? ""),
+  };
+}
 
 function normOneSpace(s: unknown): string {
   return String(s ?? "").replace(/\s+/g, " ").trim();
@@ -309,6 +330,7 @@ function menteeAnchorBlob(ep: Record<string, unknown>): string {
  * Require overlap with each side’s application text so rationales cannot be fully generic.
  * Checks are case-insensitive and punctuation-tolerant; we try several substrings, then
  * consecutive word windows, because models often paraphrase punctuation while keeping words.
+ * Proving may use the long essay alone, structured fields alone, or the combined blob.
  */
 function rationaleAnchoredToBothApplications(
   mp: Record<string, unknown>,
@@ -324,36 +346,57 @@ function rationaleAnchoredToBothApplications(
     if (fl.length < 8) return r.includes(fl);
     if (fl.length <= 28) return r.includes(fl);
 
-    const targetLen = 18;
-    const fracs = [0, 0.1, 0.2, 0.32, 0.44, 0.56, 0.68, 0.8];
+    const targetLen = 16;
+    const fracs = [0, 0.05, 0.1, 0.15, 0.2, 0.28, 0.36, 0.44, 0.52, 0.6, 0.68, 0.76, 0.84, 0.92];
     for (const frac of fracs) {
       const start = Math.floor(f.length * frac);
       const frag = f.slice(start, start + targetLen).toLowerCase();
-      if (frag.length >= 10 && r.includes(frag)) return true;
+      if (frag.replace(/\s+/g, " ").length >= 12 && r.includes(frag)) return true;
     }
     const tail = f.slice(Math.max(0, f.length - 22)).toLowerCase();
     if (tail.length >= 10 && r.includes(tail)) return true;
     return r.includes(f.slice(0, 22).toLowerCase());
   };
 
-  /** Five consecutive words from the essay appear in order in the rationale (verbatim words). */
-  const wordWindowProves = (field: unknown): boolean => {
+  /** k consecutive words from the field appear in order in the rationale (verbatim words). */
+  const wordWindowProvesK = (field: unknown, k: number, minPhraseLen: number): boolean => {
     const f = normalizeForAnchoring(String(field ?? ""));
     const words = f.split(/\s+/).filter((w) => w.length > 0);
-    if (words.length < 5) return false;
-    const step = Math.max(1, Math.floor(words.length / 24));
-    for (let i = 0; i + 5 <= words.length; i += step) {
-      const phrase = words.slice(i, i + 5).join(" ").toLowerCase();
-      if (phrase.length >= 18 && r.includes(phrase)) return true;
+    if (words.length < k) return false;
+    const step = Math.max(1, Math.floor(words.length / 36));
+    for (let i = 0; i + k <= words.length; i += step) {
+      const phrase = words.slice(i, i + k).join(" ").toLowerCase();
+      if (phrase.length >= minPhraseLen && r.includes(phrase)) return true;
     }
     return false;
   };
 
   const fieldProves = (field: unknown): boolean => {
-    return charAnchorsProve(field) || wordWindowProves(field);
+    if (!String(field ?? "").trim()) return false;
+    return (
+      charAnchorsProve(field) ||
+      wordWindowProvesK(field, 5, 16) ||
+      wordWindowProvesK(field, 4, 12)
+    );
   };
 
-  return fieldProves(mentorAnchorBlob(mp)) && fieldProves(menteeAnchorBlob(ep));
+  const mentorFocusJoin = Array.isArray(mp.mentorFocusAreas)
+    ? mp.mentorFocusAreas.filter((x): x is string => typeof x === "string").join("; ")
+    : "";
+  const menteeGoalsJoin = Array.isArray(ep.developmentGoals)
+    ? ep.developmentGoals.filter((x): x is string => typeof x === "string").join("; ")
+    : "";
+
+  const mentorProves =
+    fieldProves(mp.teachingAreas) ||
+    fieldProves(mentorFocusJoin) ||
+    fieldProves(mentorAnchorBlob(mp));
+  const menteeProves =
+    fieldProves(ep.coachingAreas) ||
+    fieldProves(menteeGoalsJoin) ||
+    fieldProves(menteeAnchorBlob(ep));
+
+  return mentorProves && menteeProves;
 }
 
 function slimForModel(rows: AppRow[]) {
@@ -751,17 +794,13 @@ async function runAiMatchWithLlm(
    * response may be before Gemini stops with finishReason MAX_TOKENS (truncated JSON).
    */
   const rationaleCharCap = menteeCount > 22 ? 580 : menteeCount > 14 ? 720 : menteeCount > 8 ? 900 : 1200;
+  /** Max output tokens per Gemini completion (Google caps vary by model; we request the API max). */
   const GEMINI_OUTPUT_HARD_CAP = 65_536;
   const geminiMaxOutFromEnv = Deno.env.get("GEMINI_MAX_OUTPUT_TOKENS")?.trim();
   const geminiMaxOutParsed = geminiMaxOutFromEnv ? Number(geminiMaxOutFromEnv) : NaN;
-  /** Default scales with mentee count so small pilots work without secrets; override via GEMINI_MAX_OUTPUT_TOKENS. */
-  const geminiMaxOutDefault = Math.min(
-    GEMINI_OUTPUT_HARD_CAP,
-    Math.max(12_288, 2200 + menteeCount * 1600),
-  );
   const geminiMaxOut = Number.isFinite(geminiMaxOutParsed) && geminiMaxOutParsed >= 1024
     ? Math.min(GEMINI_OUTPUT_HARD_CAP, Math.floor(geminiMaxOutParsed))
-    : geminiMaxOutDefault;
+    : GEMINI_OUTPUT_HARD_CAP;
   const anthropicMaxOut = Math.min(
     16_384,
     Math.max(4096, Number(Deno.env.get("ANTHROPIC_MAX_OUTPUT_TOKENS") ?? "8192") || 8192),
@@ -796,7 +835,7 @@ async function runAiMatchWithLlm(
     "- Write in natural, human prose (not bullet templates).",
     `- HARD OUTPUT CAP: each "rationale" must be at most ${rationaleCharCap} characters (count letters/spaces/punctuation). With ${menteeCount} mentees, longer rationales risk cutting off the JSON and failing the whole run. Shorter paragraphs are fine.`,
     "- Use AT LEAST TWO paragraphs separated by a blank line (two newline characters: \\n\\n).",
-    "- In the FIRST paragraph: synthesize the mentor (teachingAreas, mentorFocusAreas, mentorshipStyle, bestSuitedMentee) and the mentee (coachingAreas, developmentGoals, preferredMentorshipStyle, mentorLevelLookingFor). You MUST include at least one contiguous substring of at least 18 characters copied exactly from that mentor's teachingAreas OR from a selected mentorFocusAreas string, AND one of at least 18 characters from the mentee's coachingAreas OR from a selected developmentGoals string — all from MENTORS_JSON / MENTEES_JSON (same letters, spaces, punctuation). Put each substring inside straight double quotes so it stays exact.",
+    "- GROUNDING (validated automatically): In the FIRST paragraph, paste two short verbatim excerpts inside straight double quotes: (1) at least 16 consecutive characters copied EXACTLY from that mentor's teachingAreas OR from one mentorFocusAreas string in MENTORS_JSON; (2) at least 16 consecutive characters copied EXACTLY from that mentee's coachingAreas OR from one developmentGoals string in MENTEES_JSON. Do not paraphrase inside the quotes — copy character-for-character including spaces and punctuation. Outside the quotes you may paraphrase.",
     "- In the SECOND paragraph: explain why this pairing is likely to work in practice; reference at least one structured choice (focus area, goal, or style) and name 1–2 concrete focus areas for the first 2–3 sessions.",
     "- Avoid generic filler (\"synergy\", \"unlock value\", \"best-in-class\", \"leverage\", \"circle back\"). Prefer concrete nouns and verbs taken from their answers.",
     "",
@@ -1050,16 +1089,34 @@ Deno.serve(async (req) => {
             await supabase.from("applications").select("payload,role").eq("id", counterpartId).maybeSingle()
           );
           const pCp = (cp?.payload ?? {}) as Record<string, unknown>;
-          items.push({
-            yourRole: role,
-            yourName: String(pSelf.name ?? ""),
-            counterpartName: String(pCp.name ?? ""),
-            counterpartRole: String(cp?.role ?? ""),
-            rationale: pair.rationale,
-            score: pair.score,
-            menteeCapacitySignedUp,
-            mentorMatchTotal: role === "mentor" ? related.length : null,
-          });
+          const cpRole = String(cp?.role ?? "");
+          if (role === "mentor") {
+            items.push({
+              yourRole: role,
+              yourName: String(pSelf.name ?? ""),
+              counterpartName: String(pCp.name ?? ""),
+              counterpartRole: cpRole,
+              rationale: pair.rationale,
+              score: pair.score,
+              menteeCapacitySignedUp,
+              mentorMatchTotal: related.length,
+              menteeApplication: cpRole === "mentee" ? menteeApplicationSnapshot(pCp) : null,
+            });
+          } else {
+            items.push({
+              yourRole: role,
+              yourName: String(pSelf.name ?? ""),
+              counterpartName: String(pCp.name ?? ""),
+              counterpartRole: cpRole,
+              rationale: pair.rationale,
+              score: pair.score,
+              menteeCapacitySignedUp: null,
+              mentorMatchTotal: null,
+              mentorPublicCard: cpRole === "mentor"
+                ? { name: String(pCp.name ?? ""), jobTitle: String(pCp.jobTitle ?? "") }
+                : null,
+            });
+          }
         }
       }
       return jsonResponse({ ok: true, published: true, items });

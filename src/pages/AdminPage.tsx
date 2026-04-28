@@ -49,7 +49,7 @@ function resolveMatchSetupError(msg: string): string {
     return "The model tried to describe fit with percentages or boilerplate that conflicts with the numeric score. Click Run AI match again (the prompt now forbids that); if it keeps happening, try a slightly larger model in OPENAI_MODEL.";
   }
   if (msg === "llm_rationale_not_grounded_in_applications") {
-    return "The model’s rationale did not quote enough verbatim text from both applications. Retry Run AI match; if it repeats, shorten very long free-text answers slightly so the model can mirror real phrases.";
+    return "The model’s rationale did not include enough verbatim text from each application (essays or dropdown strings). Retry Run AI match after redeploying mentor-backend (anchoring checks were relaxed). If it still fails, shorten very long essays or remind applicants to use concrete phrases the model can quote.";
   }
   if (msg === "llm_invalid_seniority" || msg === "llm_senior_manager_pair") {
     return "The model proposed a pair where the mentor is not at least one level more senior than the mentee (same title, or mentor more junior). Run AI match again; if it keeps happening, add mentors with higher titles or adjust mentee applications.";

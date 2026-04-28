@@ -78,8 +78,10 @@ export default function ResultsPage() {
       <div className="card">
         <h1>View My Match</h1>
         <p className="lead">
-          After administrators publish pairings, look up your match using the same work email you
-          used when you applied.
+          After administrators publish pairings, look up results with the same work email you used
+          when you applied. Mentors see each mentee's application answers plus the match rationale;
+          mentees see the rationale and their mentor's name and title only (not the mentor's
+          application responses).
         </p>
         {loadError && <div className="error">{loadError}</div>}
         {published === false && !loadError && (
@@ -137,15 +139,55 @@ export default function ResultsPage() {
           {items.map((it, idx) => (
             <div key={`${it.yourRole}-${idx}`} style={{ marginTop: idx === 0 ? 0 : "1.5rem" }}>
               <p>
-                <span className="pill">{it.yourRole}</span>{" "}
-                <strong>{it.yourName}</strong>
+                <span className="pill">{it.yourRole}</span> <strong>{it.yourName}</strong>
               </p>
-              <p>
-                Matched with <strong>{it.counterpartName}</strong> (
-                <span className="pill neutral">{it.counterpartRole}</span>)
-              </p>
-              <h2>Why we think this is a strong fit</h2>
+              {it.yourRole === "mentor" ? (
+                <p>
+                  Matched mentee: <strong>{it.counterpartName}</strong> (
+                  <span className="pill neutral">mentee</span>)
+                </p>
+              ) : it.mentorPublicCard ? (
+                <p>
+                  Your mentor: <strong>{it.mentorPublicCard.name}</strong> (
+                  {it.mentorPublicCard.jobTitle}). Their application answers are not shown to mentees.
+                </p>
+              ) : (
+                <p>
+                  Matched with <strong>{it.counterpartName}</strong> (
+                  <span className="pill neutral">{it.counterpartRole}</span>)
+                </p>
+              )}
+              <h3>Why we think this is a strong fit</h3>
               <p className="muted preline">{it.rationale}</p>
+              <p className="muted" style={{ marginTop: "0.5rem" }}>
+                Match score: {it.score.toFixed(3)}
+              </p>
+              {it.yourRole === "mentor" && it.menteeApplication && (
+                <div style={{ marginTop: "1.25rem" }}>
+                  <h3>Mentee's application</h3>
+                  <p>
+                    <strong>Name:</strong> {it.menteeApplication.name}
+                    <br />
+                    <strong>Job title:</strong> {it.menteeApplication.jobTitle}
+                  </p>
+                  <p>
+                    <strong>Development goals:</strong>{" "}
+                    {it.menteeApplication.developmentGoals.join("; ")}
+                  </p>
+                  <p>
+                    <strong>Preferred mentorship style:</strong>{" "}
+                    {it.menteeApplication.preferredMentorshipStyle}
+                  </p>
+                  <p>
+                    <strong>Mentor level preference:</strong>{" "}
+                    {it.menteeApplication.mentorLevelLookingFor}
+                  </p>
+                  <p>
+                    <strong>Short answer (about them):</strong>
+                  </p>
+                  <p className="muted preline">{it.menteeApplication.coachingAreas}</p>
+                </div>
+              )}
             </div>
           ))}
         </div>

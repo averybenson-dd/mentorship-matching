@@ -15,7 +15,7 @@ import {
 import BackendRequired from "../components/BackendRequired";
 import { backendConfigured, submitApplication } from "../lib/api";
 import { isValidEmail } from "../lib/email";
-import { countWords, MIN_ESSAY_WORDS } from "../lib/wordCount";
+import { countWords, essayWordCountOk, MAX_ESSAY_WORDS, MIN_ESSAY_WORDS } from "../lib/wordCount";
 import type {
   MentorApplication,
   MenteeApplication,
@@ -56,7 +56,7 @@ const initialMentee: Omit<MenteeApplication, "role"> = {
 
 function friendlySubmitError(msg: string): string {
   if (msg === "invalid_teaching_word_count" || msg === "invalid_coaching_word_count") {
-    return `Please enter at least ${MIN_ESSAY_WORDS} words in the free-text answer.`;
+    return `The free-text answer must be between ${MIN_ESSAY_WORDS} and ${MAX_ESSAY_WORDS} words (no fewer, no more).`;
   }
   if (msg === "invalid_capacity") {
     return "Choose how many mentees you can take on (1–5).";
@@ -114,8 +114,10 @@ export default function ApplyPage() {
         setError(`Select 1–${MAX_MULTI_PICKS} primary areas you can mentor in.`);
         return;
       }
-      if (countWords(mentor.teachingAreas) < MIN_ESSAY_WORDS) {
-        setError(`Your response must be at least ${MIN_ESSAY_WORDS} words.`);
+      if (!essayWordCountOk(mentor.teachingAreas)) {
+        setError(
+          `Your response must be between ${MIN_ESSAY_WORDS} and ${MAX_ESSAY_WORDS} words (currently ${countWords(mentor.teachingAreas)}).`,
+        );
         return;
       }
       const payload: MentorApplication = { role: "mentor", ...mentor };
@@ -144,8 +146,10 @@ export default function ApplyPage() {
         setError(`Select 1–${MAX_MULTI_PICKS} development goals.`);
         return;
       }
-      if (countWords(mentee.coachingAreas) < MIN_ESSAY_WORDS) {
-        setError(`Your response must be at least ${MIN_ESSAY_WORDS} words.`);
+      if (!essayWordCountOk(mentee.coachingAreas)) {
+        setError(
+          `Your response must be between ${MIN_ESSAY_WORDS} and ${MAX_ESSAY_WORDS} words (currently ${countWords(mentee.coachingAreas)}).`,
+        );
         return;
       }
       const payload: MenteeApplication = { role: "mentee", ...mentee };
@@ -343,7 +347,9 @@ export default function ApplyPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="m-teach">Tell us about yourself * ({MIN_ESSAY_WORDS}+ words)</label>
+            <label htmlFor="m-teach">
+              Tell us about yourself * ({MIN_ESSAY_WORDS}–{MAX_ESSAY_WORDS} words, required)
+            </label>
             <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "0.5rem" }}>
               In a concise overview, share your professional experience at DoorDash and before, the
               project or work you are focused on right now, and the areas of the business where you feel
@@ -354,10 +360,10 @@ export default function ApplyPage() {
               value={mentor.teachingAreas}
               onChange={(e) => setMentor({ ...mentor, teachingAreas: e.target.value })}
               required
-              rows={10}
+              rows={6}
             />
             <p className="muted" style={{ marginTop: "0.35rem" }}>
-              {countWords(mentor.teachingAreas)} / {MIN_ESSAY_WORDS} words minimum
+              {countWords(mentor.teachingAreas)} words (must be {MIN_ESSAY_WORDS}–{MAX_ESSAY_WORDS})
             </p>
           </div>
         </>
@@ -469,7 +475,9 @@ export default function ApplyPage() {
             </select>
           </div>
           <div className="field">
-            <label htmlFor="e-coach">Tell us about yourself * ({MIN_ESSAY_WORDS}+ words)</label>
+            <label htmlFor="e-coach">
+              Tell us about yourself * ({MIN_ESSAY_WORDS}–{MAX_ESSAY_WORDS} words, required)
+            </label>
             <p className="muted" style={{ marginTop: "0.25rem", marginBottom: "0.5rem" }}>
               In a concise overview, share your professional experience at DoorDash and before, the
               project or work you are focused on right now, the parts of the business you want to learn
@@ -480,10 +488,10 @@ export default function ApplyPage() {
               value={mentee.coachingAreas}
               onChange={(e) => setMentee({ ...mentee, coachingAreas: e.target.value })}
               required
-              rows={10}
+              rows={6}
             />
             <p className="muted" style={{ marginTop: "0.35rem" }}>
-              {countWords(mentee.coachingAreas)} / {MIN_ESSAY_WORDS} words minimum
+              {countWords(mentee.coachingAreas)} words (must be {MIN_ESSAY_WORDS}–{MAX_ESSAY_WORDS})
             </p>
           </div>
         </>
