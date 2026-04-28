@@ -745,12 +745,23 @@ async function runAiMatchWithLlm(
   if (psErr) throw psErr;
   const published = Boolean(ps?.published);
   const menteeCount = mentees.length;
-  /** Keep model output small enough to avoid MAX_TOKENS truncation (invalid JSON mid-stream). */
+  /**
+   * Per-completion output budget (generationConfig.maxOutputTokens). This is NOT the same as
+   * AI Studio "TPM" — TPM is tokens/minute across all traffic; maxOutputTokens is how long ONE
+   * response may be before Gemini stops with finishReason MAX_TOKENS (truncated JSON).
+   */
   const rationaleCharCap = menteeCount > 22 ? 580 : menteeCount > 14 ? 720 : menteeCount > 8 ? 900 : 1200;
-  const geminiMaxOut = Math.min(
-    65_536,
-    Math.max(4096, Number(Deno.env.get("GEMINI_MAX_OUTPUT_TOKENS") ?? "8192") || 8192),
+  const GEMINI_OUTPUT_HARD_CAP = 65_536;
+  const geminiMaxOutFromEnv = Deno.env.get("GEMINI_MAX_OUTPUT_TOKENS")?.trim();
+  const geminiMaxOutParsed = geminiMaxOutFromEnv ? Number(geminiMaxOutFromEnv) : NaN;
+  /** Default scales with mentee count so small pilots work without secrets; override via GEMINI_MAX_OUTPUT_TOKENS. */
+  const geminiMaxOutDefault = Math.min(
+    GEMINI_OUTPUT_HARD_CAP,
+    Math.max(12_288, 2200 + menteeCount * 1600),
   );
+  const geminiMaxOut = Number.isFinite(geminiMaxOutParsed) && geminiMaxOutParsed >= 1024
+    ? Math.min(GEMINI_OUTPUT_HARD_CAP, Math.floor(geminiMaxOutParsed))
+    : geminiMaxOutDefault;
   const anthropicMaxOut = Math.min(
     16_384,
     Math.max(4096, Number(Deno.env.get("ANTHROPIC_MAX_OUTPUT_TOKENS") ?? "8192") || 8192),
