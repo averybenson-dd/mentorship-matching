@@ -54,6 +54,15 @@ function resolveMatchSetupError(msg: string): string {
   if (msg === "llm_invalid_seniority" || msg === "llm_senior_manager_pair") {
     return "The model proposed a pair where the mentor is not at least one level more senior than the mentee (same title, or mentor more junior). Run AI match again; if it keeps happening, add mentors with higher titles or adjust mentee applications.";
   }
+  if (msg === "llm_invalid_json") {
+    return "The model response was not valid JSON (often cut off mid-response or wrapped in extra text). Click Run AI match again. If it repeats, set secret GEMINI_MAX_OUTPUT_TOKENS to 16384 or trim very long application essays; check Edge Function logs for a short preview of the bad payload.";
+  }
+  if (msg === "llm_output_truncated") {
+    return "The model hit its output token limit before finishing the JSON. Retry Run AI match; if it keeps happening, raise GEMINI_MAX_OUTPUT_TOKENS / ANTHROPIC_MAX_OUTPUT_TOKENS / OPENAI_MAX_OUTPUT_TOKENS in Supabase secrets, or temporarily reduce the number of applications in the pool.";
+  }
+  if (msg === "llm_rationale_too_long") {
+    return "A rationale exceeded the allowed length. Retry Run AI match; the prompt now caps length per cohort size.";
+  }
   return edgeUserMessage(msg);
 }
 

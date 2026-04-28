@@ -391,7 +391,9 @@ function validateLlmPairs(
   pairs: unknown,
   mentorById: Map<string, AppRow>,
   menteeById: Map<string, AppRow>,
+  opts?: { rationaleCharCap?: number },
 ): { mentorId: string; menteeId: string; score: number; rationale: string }[] {
+  const rationaleMax = (opts?.rationaleCharCap ?? 1200) + 200;
   if (!Array.isArray(pairs)) throw new Error("llm_pairs_not_array");
   const usedMentees = new Set<string>();
   const mentorCounts = new Map<string, number>();
@@ -434,6 +436,7 @@ function validateLlmPairs(
     usedMentees.add(menteeId);
 
     if (rationale.trim().length < 220) throw new Error("llm_rationale_too_short");
+    if (rationale.length > rationaleMax) throw new Error("llm_rationale_too_long");
     if (!rationale.includes("\n\n")) throw new Error("llm_rationale_not_two_paragraphs");
     if (rationaleUsesForbiddenScoreLanguage(rationale)) {
       throw new Error("llm_rationale_forbidden_score_language");
@@ -490,11 +493,77 @@ function extractAnthropicText(json: Record<string, unknown>): string {
   return parts.join("");
 }
 
-/** Claude sometimes wraps JSON in ``` fences even when asked not to. */
-function unwrapLeadingCodeFence(s: string): string {
-  const t = s.trim();
-  if (!t.startsWith("```")) return t;
-  return t.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/u, "").trim();
+/** Strip optional ```json fences (leading and/or wrapping the whole payload). */
+function unwrapMarkdownJsonFences(s: string): string {
+  let t = s.trim();
+  const wrapped = /^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/im.exec(t);
+  if (wrapped?.[1]) return wrapped[1].trim();
+  if (t.startsWith("```")) {
+    t = t.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/u, "").trim();
+  }
+  return t;
+}
+
+/**
+ * Extract the first top-level JSON object, respecting strings so braces inside rationales
+ * do not end the object early.
+ */
+function extractBalancedJsonObject(s: string): string | null {
+  const start = s.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i]!;
+    if (inStr) {
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (c === "\\") {
+        esc = true;
+        continue;
+      }
+      if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') {
+      inStr = true;
+      continue;
+    }
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return s.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
+function parseModelJsonOutput(raw: string): unknown {
+  const cleaned = unwrapMarkdownJsonFences(raw.trim());
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const slice = extractBalancedJsonObject(cleaned);
+    if (slice) {
+      try {
+        return JSON.parse(slice);
+      } catch {
+        /* fall through */
+      }
+    }
+    throw new Error("llm_invalid_json");
+  }
+}
+
+function geminiFinishReason(oaJson: Record<string, unknown>): string | undefined {
+  const candidates = oaJson.candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) return undefined;
+  const c0 = candidates[0];
+  if (!isRecord(c0)) return undefined;
+  return typeof c0.finishReason === "string" ? c0.finishReason : undefined;
 }
 
 /** Non-secret snapshot for admin diagnostics (matches routing logic below). */
@@ -675,6 +744,21 @@ async function runAiMatchWithLlm(
   );
   if (psErr) throw psErr;
   const published = Boolean(ps?.published);
+  const menteeCount = mentees.length;
+  /** Keep model output small enough to avoid MAX_TOKENS truncation (invalid JSON mid-stream). */
+  const rationaleCharCap = menteeCount > 22 ? 580 : menteeCount > 14 ? 720 : menteeCount > 8 ? 900 : 1200;
+  const geminiMaxOut = Math.min(
+    65_536,
+    Math.max(4096, Number(Deno.env.get("GEMINI_MAX_OUTPUT_TOKENS") ?? "8192") || 8192),
+  );
+  const anthropicMaxOut = Math.min(
+    16_384,
+    Math.max(4096, Number(Deno.env.get("ANTHROPIC_MAX_OUTPUT_TOKENS") ?? "8192") || 8192),
+  );
+  const openaiMaxOut = Math.min(
+    16_384,
+    Math.max(4096, Number(Deno.env.get("OPENAI_MAX_OUTPUT_TOKENS") ?? "16000") || 16000),
+  );
 
   const system = [
     "You are an expert internal mentorship matcher. You only know what appears in the JSON blobs provided in the user message.",
@@ -699,6 +783,7 @@ async function runAiMatchWithLlm(
     "",
     "RATIONALE REQUIREMENTS:",
     "- Write in natural, human prose (not bullet templates).",
+    `- HARD OUTPUT CAP: each "rationale" must be at most ${rationaleCharCap} characters (count letters/spaces/punctuation). With ${menteeCount} mentees, longer rationales risk cutting off the JSON and failing the whole run. Shorter paragraphs are fine.`,
     "- Use AT LEAST TWO paragraphs separated by a blank line (two newline characters: \\n\\n).",
     "- In the FIRST paragraph: synthesize the mentor (teachingAreas, mentorFocusAreas, mentorshipStyle, bestSuitedMentee) and the mentee (coachingAreas, developmentGoals, preferredMentorshipStyle, mentorLevelLookingFor). You MUST include at least one contiguous substring of at least 18 characters copied exactly from that mentor's teachingAreas OR from a selected mentorFocusAreas string, AND one of at least 18 characters from the mentee's coachingAreas OR from a selected developmentGoals string — all from MENTORS_JSON / MENTEES_JSON (same letters, spaces, punctuation). Put each substring inside straight double quotes so it stays exact.",
     "- In the SECOND paragraph: explain why this pairing is likely to work in practice; reference at least one structured choice (focus area, goal, or style) and name 1–2 concrete focus areas for the first 2–3 sessions.",
@@ -719,7 +804,7 @@ async function runAiMatchWithLlm(
     contents: [{ role: "user", parts: [{ text: user }] }],
     generationConfig: {
       temperature: 0.22,
-      maxOutputTokens: 8192,
+      maxOutputTokens: geminiMaxOut,
       responseMimeType: "application/json",
     },
   };
@@ -733,7 +818,7 @@ async function runAiMatchWithLlm(
         : transport.family === "anthropic"
         ? {
           model: transport.model,
-          max_tokens: 8192,
+          max_tokens: anthropicMaxOut,
           temperature: 0.22,
           system: systemForAnthropic,
           messages: [{ role: "user", content: user }],
@@ -741,7 +826,7 @@ async function runAiMatchWithLlm(
         : {
           model: transport.model,
           temperature: 0.22,
-          max_tokens: 5000,
+          max_tokens: openaiMaxOut,
           response_format: { type: "json_object" },
           messages: [
             { role: "system", content: system },
@@ -775,12 +860,23 @@ async function runAiMatchWithLlm(
 
   let content: string;
   if (transport.family === "gemini") {
-    content = unwrapLeadingCodeFence(extractGeminiText(oaJson));
+    const fr = geminiFinishReason(oaJson);
+    if (fr === "MAX_TOKENS") {
+      throw new Error("llm_output_truncated");
+    }
+    content = extractGeminiText(oaJson);
   } else if (transport.family === "anthropic") {
-    content = unwrapLeadingCodeFence(extractAnthropicText(oaJson));
+    const sr = typeof oaJson.stop_reason === "string" ? oaJson.stop_reason : "";
+    if (sr === "max_tokens") throw new Error("llm_output_truncated");
+    content = extractAnthropicText(oaJson);
   } else {
     const choices = oaJson.choices as unknown[] | undefined;
     const first = Array.isArray(choices) && choices.length > 0 ? choices[0] : null;
+    const finish =
+      first && isRecord(first) && typeof first.finish_reason === "string"
+        ? String(first.finish_reason)
+        : "";
+    if (finish === "length") throw new Error("llm_output_truncated");
     const message = first && isRecord(first) && isRecord(first.message)
       ? first.message
       : null;
@@ -790,13 +886,20 @@ async function runAiMatchWithLlm(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
-  } catch {
-    throw new Error("llm_invalid_json");
+    parsed = parseModelJsonOutput(content);
+  } catch (e) {
+    if (e instanceof Error && e.message === "llm_invalid_json") {
+      const head = content.slice(0, 280).replace(/\s+/g, " ");
+      const tail = content.slice(Math.max(0, content.length - 280)).replace(/\s+/g, " ");
+      console.error("llm_invalid_json: parse failed. head=", head, "tail=", tail, "len=", content.length);
+    }
+    throw e instanceof Error ? e : new Error("llm_invalid_json");
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.pairs)) throw new Error("llm_missing_pairs");
 
-  const matches = validateLlmPairs(parsed.pairs, mentorById, menteeById);
+  const matches = validateLlmPairs(parsed.pairs, mentorById, menteeById, {
+    rationaleCharCap,
+  });
 
   const { error: upErr } = await withPostgrestRetry(async () =>
     await supabase.from("program_state").upsert({
